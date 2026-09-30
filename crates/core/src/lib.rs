@@ -29,8 +29,8 @@ pub use instrument::{InstrumentError, InstrumentId, InstrumentKind, VenueId};
 pub use metrics::{Performance, Report};
 pub use order::{ExecutionReport, Order, OrderBook, OrderError, OrderId, OrderStatus};
 pub use ports::{
-    AgentCall, BarStore, EventLog, Journal, MarketData, MarketStream, PortError, RunInfo, RunKind,
-    StreamedBar,
+    AgentCall, BarStore, EventLog, Journal, MarketData, MarketStream, Notification, Notifier,
+    PortError, RunInfo, RunKind, Severity, StreamedBar,
 };
 pub use strategy::Strategy;
 pub use types::{Bar, EquityPoint, Fill, Series, Side};

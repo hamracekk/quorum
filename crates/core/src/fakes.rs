@@ -12,7 +12,9 @@ use futures_core::stream::BoxStream;
 
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
-use crate::ports::{BarStore, EventLog, MarketData, MarketStream, PortError, StreamedBar};
+use crate::ports::{
+    BarStore, EventLog, MarketData, MarketStream, Notification, Notifier, PortError, StreamedBar,
+};
 use crate::types::{Bar, Series};
 
 /// A recorded `MarketData::bars` call: instrument, start, end.
@@ -187,6 +189,37 @@ impl EventLog for MemoryEventLog {
             .filter(|e| e.event.ts() >= start && e.event.ts() < end)
             .cloned()
             .collect())
+    }
+}
+
+/// Records every notification it is given.
+#[derive(Debug, Default)]
+pub struct MemoryNotifier {
+    sent: Mutex<Vec<Notification>>,
+}
+
+impl MemoryNotifier {
+    /// Everything notified so far, in order.
+    pub fn sent(&self) -> Vec<Notification> {
+        self.sent
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[async_trait]
+impl Notifier for MemoryNotifier {
+    fn name(&self) -> &'static str {
+        "memory"
+    }
+
+    async fn notify(&self, notification: &Notification) -> Result<(), PortError> {
+        self.sent
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(notification.clone());
+        Ok(())
     }
 }
 

@@ -2,8 +2,7 @@
 //!
 //! Adapters (Binance, Parquet, …) live in other crates and implement these traits; the
 //! engine, lab and CLI only ever see the traits. Ports are added in the milestone that
-//! first needs them: `LlmProvider` and `NewsSource` (M5), `TraderSource` (M7),
-//! `Notifier` (integrations). The order-execution port, [`Broker`](crate::broker::Broker),
+//! first needs them: `LlmProvider` and `NewsSource` (M5), `TraderSource` (M7). The order-execution port, [`Broker`](crate::broker::Broker),
 //! is synchronous and lives with the engine in [`crate::broker`].
 
 use std::error::Error as StdError;
@@ -14,7 +13,7 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures_core::stream::BoxStream;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
@@ -104,6 +103,40 @@ pub trait EventLog: Send + Sync + fmt::Debug {
 
     /// Events with `start <= ts < end`, in sequence order.
     fn read(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<Envelope>, PortError>;
+}
+
+/// How urgent a notification is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    /// Routine: daily summaries, session started.
+    Info,
+    /// Needs a look soon: risk halt, rejected order, live stream ended.
+    Warning,
+    /// Needs a look now: kill switch, the engine stopped on an error.
+    Critical,
+}
+
+/// A human-readable message for the operator. Plain text only; never contains secrets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Notification {
+    pub ts: DateTime<Utc>,
+    pub severity: Severity,
+    /// One line, e.g. `paper · daily summary 2026-09-30`.
+    pub title: String,
+    pub body: String,
+}
+
+/// Outbound messages to the operator: log, desktop notification, later webhooks/n8n (INT).
+///
+/// Delivery is best effort. Callers treat an error as "not delivered" and carry on; a
+/// notification failure must never stop trading.
+#[async_trait]
+pub trait Notifier: Send + Sync + fmt::Debug {
+    /// Short adapter name for status displays, e.g. `log` or `desktop`.
+    fn name(&self) -> &str;
+
+    async fn notify(&self, notification: &Notification) -> Result<(), PortError>;
 }
 
 /// What produced a journaled run.
