@@ -1,18 +1,20 @@
-//! Market data acquisition and local storage.
+//! Market data adapters and local storage.
 //!
-//! Candles are stored one Parquet file per symbol and interval under a data directory,
-//! and [`sync`] keeps them current by downloading only bars newer than the last one
-//! on disk.
+//! - [`BinanceSpot`](binance::BinanceSpot) implements the `MarketData` port.
+//! - [`ParquetStore`] implements the `BarStore` port: one Parquet file per instrument and
+//!   interval under `<root>/<venue>/`.
+//! - [`sync`] keeps a store current from any `MarketData` source, fetching only bars newer
+//!   than the last one stored.
 
 pub mod binance;
 mod error;
 mod store;
 
 pub use error::{DataError, Result};
-pub use store::{Store, read_parquet, write_parquet};
+pub use store::{ParquetStore, read_parquet, write_parquet};
 
-use chrono::{Duration, Utc};
-use trader_core::Series;
+use chrono::{DateTime, Duration, Utc};
+use trader_core::{BarStore, InstrumentId, MarketData, PortError, Series};
 
 /// Result of a [`sync`] call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,20 +23,26 @@ pub struct SyncOutcome {
     pub total: usize,
 }
 
-/// Bring the stored candles for `symbol`/`interval` up to date.
+/// Bring the stored bars for `instrument`/`interval` up to date as of `until`.
 ///
-/// With nothing stored yet, downloads the last `history`. Otherwise downloads only
-/// bars newer than the last stored one and appends them.
-pub fn sync(store: &Store, symbol: &str, interval: &str, history: Duration) -> Result<SyncOutcome> {
+/// With nothing stored yet, downloads from `since_if_empty`. Otherwise downloads only bars
+/// newer than the last stored one and appends them.
+pub async fn sync(
+    source: &dyn MarketData,
+    store: &dyn BarStore,
+    instrument: &InstrumentId,
+    interval: &str,
+    since_if_empty: DateTime<Utc>,
+    until: DateTime<Utc>,
+) -> std::result::Result<SyncOutcome, PortError> {
     let mut bars = store
-        .load(symbol, interval)?
+        .load(instrument, interval)?
         .map(|s| s.bars)
         .unwrap_or_default();
     let last = bars.last().map(|b| b.ts);
-    let now = Utc::now();
-    let start = last.map_or(now - history, |ts| ts + Duration::milliseconds(1));
+    let start = last.map_or(since_if_empty, |ts| ts + Duration::milliseconds(1));
 
-    let fresh = binance::fetch_klines(symbol, interval, start, now)?;
+    let fresh = source.bars(instrument, interval, start, until).await?;
     let before = bars.len();
     bars.extend(
         fresh
@@ -44,9 +52,114 @@ pub fn sync(store: &Store, symbol: &str, interval: &str, history: Duration) -> R
     let added = bars.len() - before;
 
     if added > 0 {
-        store.save(&Series::new(symbol, bars), interval)?;
+        store.save(&Series::new(instrument.clone(), bars), interval)?;
     }
     let total = before + added;
-    tracing::info!(symbol, interval, added, total, "synced candles");
+    tracing::info!(%instrument, interval, added, total, "synced bars");
     Ok(SyncOutcome { added, total })
+}
+
+#[cfg(test)]
+mod tests {
+    use trader_core::fakes::{MemoryBarStore, MemoryMarketData};
+    use trader_core::{Bar, VenueId};
+
+    use super::*;
+
+    fn at(hours: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp(hours * 3_600, 0).expect("valid timestamp")
+    }
+
+    fn bars(hours: std::ops::Range<i64>) -> Vec<Bar> {
+        hours
+            .map(|h| Bar {
+                ts: at(h),
+                open: 1.0,
+                high: 1.0,
+                low: 1.0,
+                close: 1.0,
+                volume: 1.0,
+            })
+            .collect()
+    }
+
+    fn instrument() -> InstrumentId {
+        InstrumentId::spot("test", "BTC").expect("valid instrument")
+    }
+
+    fn source(hours: std::ops::Range<i64>) -> MemoryMarketData {
+        MemoryMarketData::new(VenueId::new("test").expect("valid venue"))
+            .with_bars(instrument(), bars(hours))
+    }
+
+    #[tokio::test]
+    async fn first_sync_downloads_history() {
+        let store = MemoryBarStore::default();
+        let outcome = sync(&source(0..10), &store, &instrument(), "1h", at(0), at(100))
+            .await
+            .expect("sync");
+        assert_eq!(
+            outcome,
+            SyncOutcome {
+                added: 10,
+                total: 10
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn later_syncs_fetch_only_newer_bars() {
+        let store = MemoryBarStore::default();
+        sync(&source(0..10), &store, &instrument(), "1h", at(0), at(100))
+            .await
+            .expect("first sync");
+
+        let newer = source(0..12);
+        let outcome = sync(&newer, &store, &instrument(), "1h", at(0), at(100))
+            .await
+            .expect("second sync");
+
+        assert_eq!(
+            outcome,
+            SyncOutcome {
+                added: 2,
+                total: 12
+            }
+        );
+        let requests = newer.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0].1 > at(9),
+            "must start after the last stored bar"
+        );
+    }
+
+    #[tokio::test]
+    async fn unchanged_source_adds_nothing() {
+        let store = MemoryBarStore::default();
+        let data = source(0..5);
+        sync(&data, &store, &instrument(), "1h", at(0), at(100))
+            .await
+            .expect("first sync");
+        let outcome = sync(&data, &store, &instrument(), "1h", at(0), at(100))
+            .await
+            .expect("second sync");
+        assert_eq!(outcome, SyncOutcome { added: 0, total: 5 });
+    }
+
+    #[tokio::test]
+    async fn wrong_venue_is_rejected() {
+        let other = InstrumentId::spot("elsewhere", "BTC").expect("valid instrument");
+        let err = sync(
+            &source(0..5),
+            &MemoryBarStore::default(),
+            &other,
+            "1h",
+            at(0),
+            at(100),
+        )
+        .await
+        .expect_err("unsupported venue");
+        assert!(matches!(err, PortError::Unsupported(_)));
+    }
 }

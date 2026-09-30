@@ -1,11 +1,14 @@
 use std::path::PathBuf;
 
+/// Detailed adapter errors; wrapped in `PortError` at the port boundary.
 #[derive(Debug, thiserror::Error)]
 pub enum DataError {
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
     #[error("unexpected exchange response: {0}")]
     Malformed(String),
+    #[error("invalid interval `{0}`: use letters and digits only, e.g. 1h")]
+    InvalidInterval(String),
     #[error("I/O error on {path}: {source}")]
     Io {
         path: PathBuf,

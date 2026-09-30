@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 
+use crate::instrument::InstrumentId;
 use crate::types::{Fill, Side};
 
-/// Multi-symbol simulated broker with proportional fees and fixed slippage.
+/// Multi-instrument simulated broker with proportional fees and fixed slippage.
 ///
 /// Positions are valued at the last price passed to [`mark`](Self::mark) or
 /// [`rebalance`](Self::rebalance). Fees are paid from cash, so fully-invested targets
@@ -12,8 +13,8 @@ use crate::types::{Fill, Side};
 #[derive(Debug, Clone)]
 pub struct SimBroker {
     cash: f64,
-    positions: BTreeMap<String, f64>,
-    marks: BTreeMap<String, f64>,
+    positions: BTreeMap<InstrumentId, f64>,
+    marks: BTreeMap<InstrumentId, f64>,
     fee_rate: f64,
     slippage: f64,
     min_notional: f64,
@@ -35,40 +36,42 @@ impl SimBroker {
         self.cash
     }
 
-    pub fn position(&self, symbol: &str) -> f64 {
-        self.positions.get(symbol).copied().unwrap_or(0.0)
+    pub fn position(&self, instrument: &InstrumentId) -> f64 {
+        self.positions.get(instrument).copied().unwrap_or(0.0)
     }
 
-    /// Update the valuation price of `symbol`.
-    pub fn mark(&mut self, symbol: &str, price: f64) {
-        self.marks.insert(symbol.to_owned(), price);
+    /// Update the valuation price of `instrument`.
+    pub fn mark(&mut self, instrument: &InstrumentId, price: f64) {
+        self.marks.insert(instrument.clone(), price);
     }
 
     /// Cash plus all positions valued at their latest marks.
     pub fn equity(&self) -> f64 {
-        self.positions.iter().fold(self.cash, |acc, (symbol, qty)| {
-            let price = self.marks.get(symbol).copied().unwrap_or(0.0);
-            qty.mul_add(price, acc)
-        })
+        self.positions
+            .iter()
+            .fold(self.cash, |acc, (instrument, qty)| {
+                let price = self.marks.get(instrument).copied().unwrap_or(0.0);
+                qty.mul_add(price, acc)
+            })
     }
 
-    /// Trade `symbol` toward `target` exposure (fraction of total equity) at `price`.
+    /// Trade `instrument` toward `target` exposure (fraction of total equity) at `price`.
     /// Returns `None` when the change is below the minimum notional.
     pub fn rebalance(
         &mut self,
-        symbol: &str,
+        instrument: &InstrumentId,
         ts: DateTime<Utc>,
         price: f64,
         target: f64,
     ) -> Option<Fill> {
-        self.mark(symbol, price);
+        self.mark(instrument, price);
         let equity = self.equity();
         let target_qty = if equity > 0.0 && price > 0.0 {
             target * equity / price
         } else {
             0.0
         };
-        let delta = target_qty - self.position(symbol);
+        let delta = target_qty - self.position(instrument);
         if (delta * price).abs() < self.min_notional {
             return None;
         }
@@ -81,11 +84,11 @@ impl SimBroker {
         let fee = delta.abs() * exec_price * self.fee_rate;
 
         self.cash -= delta.mul_add(exec_price, fee);
-        *self.positions.entry(symbol.to_owned()).or_insert(0.0) += delta;
+        *self.positions.entry(instrument.clone()).or_insert(0.0) += delta;
 
         Some(Fill {
             ts,
-            symbol: symbol.to_owned(),
+            instrument: instrument.clone(),
             side,
             qty: delta.abs(),
             price: exec_price,
@@ -98,6 +101,10 @@ impl SimBroker {
 mod tests {
     use super::*;
 
+    fn id(symbol: &str) -> InstrumentId {
+        InstrumentId::spot("test", symbol).expect("valid instrument")
+    }
+
     fn ts() -> DateTime<Utc> {
         DateTime::from_timestamp(0, 0).expect("valid timestamp")
     }
@@ -105,45 +112,80 @@ mod tests {
     #[test]
     fn round_trip_without_costs_realises_pnl() {
         let mut broker = SimBroker::new(1_000.0, 0.0, 0.0);
-        let buy = broker.rebalance("A", ts(), 100.0, 1.0).expect("buy fill");
+        let buy = broker
+            .rebalance(&id("A"), ts(), 100.0, 1.0)
+            .expect("buy fill");
         assert_eq!(buy.side, Side::Buy);
-        assert!((broker.position("A") - 10.0).abs() < 1e-9);
+        assert!((broker.position(&id("A")) - 10.0).abs() < 1e-9);
         assert!(broker.cash().abs() < 1e-9);
 
-        broker.rebalance("A", ts(), 110.0, 0.0).expect("sell fill");
-        assert!(broker.position("A").abs() < 1e-9);
+        broker
+            .rebalance(&id("A"), ts(), 110.0, 0.0)
+            .expect("sell fill");
+        assert!(broker.position(&id("A")).abs() < 1e-9);
         assert!((broker.cash() - 1_100.0).abs() < 1e-9);
     }
 
     #[test]
     fn targets_are_fractions_of_total_equity() {
         let mut broker = SimBroker::new(1_000.0, 0.0, 0.0);
-        broker.rebalance("A", ts(), 100.0, 0.5);
-        broker.rebalance("B", ts(), 50.0, 0.5);
-        assert!((broker.position("A") - 5.0).abs() < 1e-9);
-        assert!((broker.position("B") - 10.0).abs() < 1e-9);
+        broker.rebalance(&id("A"), ts(), 100.0, 0.5);
+        broker.rebalance(&id("B"), ts(), 50.0, 0.5);
+        assert!((broker.position(&id("A")) - 5.0).abs() < 1e-9);
+        assert!((broker.position(&id("B")) - 10.0).abs() < 1e-9);
 
-        broker.mark("A", 200.0);
+        broker.mark(&id("A"), 200.0);
         assert!((broker.equity() - 1_500.0).abs() < 1e-9);
     }
 
     #[test]
     fn fees_and_slippage_reduce_equity() {
         let mut broker = SimBroker::new(1_000.0, 0.001, 10.0);
-        broker.rebalance("A", ts(), 100.0, 1.0);
-        broker.rebalance("A", ts(), 100.0, 0.0);
+        broker.rebalance(&id("A"), ts(), 100.0, 1.0);
+        broker.rebalance(&id("A"), ts(), 100.0, 0.0);
         assert!(broker.equity() < 1_000.0);
     }
 
     #[test]
     fn tiny_changes_are_skipped() {
         let mut broker = SimBroker::new(1_000.0, 0.0, 0.0);
-        assert!(broker.rebalance("A", ts(), 100.0, 0.0005).is_none());
+        assert!(broker.rebalance(&id("A"), ts(), 100.0, 0.0005).is_none());
     }
 
     #[test]
     fn zero_price_never_trades() {
         let mut broker = SimBroker::new(1_000.0, 0.0, 0.0);
-        assert!(broker.rebalance("A", ts(), 0.0, 1.0).is_none());
+        assert!(broker.rebalance(&id("A"), ts(), 0.0, 1.0).is_none());
+    }
+
+    #[test]
+    fn short_positions_profit_when_price_falls() {
+        let mut broker = SimBroker::new(1_000.0, 0.0, 0.0);
+        let fill = broker
+            .rebalance(&id("A"), ts(), 100.0, -1.0)
+            .expect("short fill");
+        assert_eq!(fill.side, Side::Sell);
+        assert!((broker.position(&id("A")) + 10.0).abs() < 1e-9);
+        assert!((broker.cash() - 2_000.0).abs() < 1e-9);
+
+        broker.mark(&id("A"), 90.0);
+        assert!((broker.equity() - 1_100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn slippage_worsens_price_on_both_sides() {
+        let mut broker = SimBroker::new(1_000.0, 0.0, 10.0);
+        let buy = broker.rebalance(&id("A"), ts(), 100.0, 1.0).expect("buy");
+        let sell = broker.rebalance(&id("A"), ts(), 100.0, 0.0).expect("sell");
+        assert!((buy.price - 100.1).abs() < 1e-9);
+        assert!((sell.price - 99.9).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fee_is_charged_on_notional() {
+        let mut broker = SimBroker::new(1_000.0, 0.01, 0.0);
+        let fill = broker.rebalance(&id("A"), ts(), 100.0, 0.5).expect("buy");
+        assert!((fill.fee - 5.0).abs() < 1e-9);
+        assert!((broker.cash() - 495.0).abs() < 1e-9);
     }
 }

@@ -60,4 +60,14 @@ mod tests {
                 .all(|w| w[0].report.strategy.sharpe >= w[1].report.strategy.sharpe)
         );
     }
+
+    #[test]
+    fn empty_grid_yields_no_rows() {
+        let factory = |&(fast, slow): &(usize, usize)| -> Box<dyn Strategy> {
+            Box::new(SmaCross::new(fast, slow, false))
+        };
+        let empty: [(usize, usize); 0] = [];
+        let data = [trending_series("A", 50)];
+        assert!(sweep(&empty, &factory, &data, &BacktestConfig::default()).is_empty());
+    }
 }

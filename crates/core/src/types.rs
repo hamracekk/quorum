@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::instrument::InstrumentId;
+
 /// One OHLCV candle. `ts` is the bar's open time.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Bar {
@@ -15,16 +17,13 @@ pub struct Bar {
 /// Bars of a single instrument, sorted by time with no duplicates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Series {
-    pub symbol: String,
+    pub instrument: InstrumentId,
     pub bars: Vec<Bar>,
 }
 
 impl Series {
-    pub fn new(symbol: impl Into<String>, bars: Vec<Bar>) -> Self {
-        Self {
-            symbol: symbol.into(),
-            bars,
-        }
+    pub const fn new(instrument: InstrumentId, bars: Vec<Bar>) -> Self {
+        Self { instrument, bars }
     }
 
     /// Bars with `start <= ts < end`.
@@ -33,7 +32,7 @@ impl Series {
         let lo = self.bars.partition_point(|b| b.ts < start);
         let hi = self.bars.partition_point(|b| b.ts < end).max(lo);
         Self {
-            symbol: self.symbol.clone(),
+            instrument: self.instrument.clone(),
             bars: self.bars[lo..hi].to_vec(),
         }
     }
@@ -49,7 +48,7 @@ pub enum Side {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Fill {
     pub ts: DateTime<Utc>,
-    pub symbol: String,
+    pub instrument: InstrumentId,
     pub side: Side,
     pub qty: f64,
     pub price: f64,
@@ -83,7 +82,10 @@ mod tests {
                 volume: 1.0,
             })
             .collect();
-        Series::new("TEST", bars)
+        Series::new(
+            InstrumentId::spot("test", "TEST").expect("valid instrument"),
+            bars,
+        )
     }
 
     #[test]

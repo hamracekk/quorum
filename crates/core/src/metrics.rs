@@ -191,4 +191,29 @@ mod tests {
         let perf = Performance::from_curve(100.0, &[]);
         assert!(perf.total_return.abs() < 1e-12);
     }
+
+    #[test]
+    fn cagr_over_exactly_one_year_equals_total_return() {
+        let year = 31_557_600; // 365.25 days in seconds
+        let curve = [
+            EquityPoint {
+                ts: DateTime::from_timestamp(0, 0).expect("valid timestamp"),
+                equity: 100.0,
+            },
+            EquityPoint {
+                ts: DateTime::from_timestamp(year, 0).expect("valid timestamp"),
+                equity: 110.0,
+            },
+        ];
+        let perf = Performance::from_curve(100.0, &curve);
+        assert!((perf.cagr - 0.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn report_prints_strategy_next_to_benchmark() {
+        let report = Report::compute(100.0, &curve(&[100.0, 110.0]), &curve(&[100.0, 105.0]), &[]);
+        let text = report.to_string();
+        assert!(text.contains("strategy") && text.contains("buy & hold"));
+        assert!(text.contains("10.00%") && text.contains("5.00%"), "{text}");
+    }
 }

@@ -9,36 +9,91 @@ use parquet::arrow::ArrowWriter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
-use trader_core::{Bar, Series};
+use trader_core::{Bar, BarStore, InstrumentId, InstrumentKind, PortError, Series, VenueId};
 
 use crate::{DataError, Result};
 
-/// Directory of candle files: `<root>/<SYMBOL>-<interval>.parquet`.
+/// `BarStore` on Parquet files: `<root>/<venue>/<SYMBOL>-<interval>[-<kind>].parquet`
+/// (the kind suffix is omitted for spot).
 #[derive(Debug, Clone)]
-pub struct Store {
+pub struct ParquetStore {
     root: PathBuf,
 }
 
-impl Store {
+impl ParquetStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
 
-    pub fn path(&self, symbol: &str, interval: &str) -> PathBuf {
-        self.root.join(format!("{symbol}-{interval}.parquet"))
+    pub fn path(&self, instrument: &InstrumentId, interval: &str) -> Result<PathBuf> {
+        if interval.is_empty() || !interval.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(DataError::InvalidInterval(interval.to_owned()));
+        }
+        let kind = match instrument.kind() {
+            InstrumentKind::Spot => String::new(),
+            other => format!("-{}", other.code()),
+        };
+        Ok(self
+            .root
+            .join(instrument.venue().as_str())
+            .join(format!("{}-{interval}{kind}.parquet", instrument.symbol())))
     }
 
-    /// Stored candles, or `None` if nothing has been fetched for this pair yet.
-    pub fn load(&self, symbol: &str, interval: &str) -> Result<Option<Series>> {
-        let path = self.path(symbol, interval);
+    /// Move files from the M1 flat layout (`<root>/<SYMBOL>-<interval>.parquet`) into
+    /// `<root>/<venue>/`. Returns how many files were moved; existing targets are kept.
+    pub fn migrate_flat_layout(&self, venue: &VenueId) -> Result<usize> {
+        let io = |path: &Path| {
+            let path = path.to_path_buf();
+            move |source| DataError::Io { path, source }
+        };
+        if !self.root.is_dir() {
+            return Ok(0);
+        }
+        let target_dir = self.root.join(venue.as_str());
+        let mut moved = 0;
+        for entry in fs::read_dir(&self.root).map_err(io(&self.root))? {
+            let path = entry.map_err(io(&self.root))?.path();
+            let is_parquet = path.extension().is_some_and(|ext| ext == "parquet");
+            let Some(name) = path.file_name().filter(|_| path.is_file() && is_parquet) else {
+                continue;
+            };
+            let target = target_dir.join(name);
+            if target.exists() {
+                tracing::warn!(from = %path.display(), to = %target.display(), "target exists; left in place");
+                continue;
+            }
+            fs::create_dir_all(&target_dir).map_err(io(&target_dir))?;
+            fs::rename(&path, &target).map_err(io(&path))?;
+            moved += 1;
+        }
+        if moved > 0 {
+            tracing::info!(moved, venue = %venue, "migrated bar files to per-venue layout");
+        }
+        Ok(moved)
+    }
+}
+
+fn port(err: DataError) -> PortError {
+    PortError::adapter("parquet store", err)
+}
+
+impl BarStore for ParquetStore {
+    fn load(
+        &self,
+        instrument: &InstrumentId,
+        interval: &str,
+    ) -> std::result::Result<Option<Series>, PortError> {
+        let path = self.path(instrument, interval).map_err(port)?;
         if !path.exists() {
             return Ok(None);
         }
-        Ok(Some(Series::new(symbol, read_parquet(&path)?)))
+        let bars = read_parquet(&path).map_err(port)?;
+        Ok(Some(Series::new(instrument.clone(), bars)))
     }
 
-    pub fn save(&self, series: &Series, interval: &str) -> Result<()> {
-        write_parquet(&self.path(&series.symbol, interval), &series.bars)
+    fn save(&self, series: &Series, interval: &str) -> std::result::Result<(), PortError> {
+        let path = self.path(&series.instrument, interval).map_err(port)?;
+        write_parquet(&path, &series.bars).map_err(port)
     }
 }
 
@@ -103,7 +158,7 @@ pub fn write_parquet(path: &Path, bars: &[Bar]) -> Result<()> {
     fs::rename(&tmp, path).map_err(io)
 }
 
-/// Read candles written by [`write_parquet`], verifying they are sorted and unique.
+/// Read bars written by [`write_parquet`], verifying they are sorted and unique.
 pub fn read_parquet(path: &Path) -> Result<Vec<Bar>> {
     let corrupt = |reason: String| DataError::Corrupt {
         path: path.to_path_buf(),
@@ -179,20 +234,57 @@ mod tests {
         dir
     }
 
+    fn btc() -> InstrumentId {
+        InstrumentId::spot("binance", "BTCUSDT").expect("valid instrument")
+    }
+
     #[test]
-    fn round_trips_bars() {
-        let store = Store::new(temp_dir("roundtrip"));
-        let series = Series::new("TEST", vec![bar(0, 100.0), bar(1, 101.5)]);
+    fn round_trips_bars_through_the_port() {
+        let store = ParquetStore::new(temp_dir("roundtrip"));
+        let series = Series::new(btc(), vec![bar(0, 100.0), bar(1, 101.5)]);
         store.save(&series, "1h").expect("save");
 
-        let loaded = store.load("TEST", "1h").expect("load").expect("exists");
+        let loaded = store.load(&btc(), "1h").expect("load").expect("exists");
         assert_eq!(loaded, series);
     }
 
     #[test]
+    fn files_are_grouped_by_venue_with_kind_suffix() {
+        let store = ParquetStore::new("/data");
+        let spot = store.path(&btc(), "1h").expect("path");
+        assert_eq!(spot, PathBuf::from("/data/binance/BTCUSDT-1h.parquet"));
+
+        let perp: InstrumentId = "hyperliquid:BTC:perp".parse().expect("valid instrument");
+        let perp = store.path(&perp, "4h").expect("path");
+        assert_eq!(perp, PathBuf::from("/data/hyperliquid/BTC-4h-perp.parquet"));
+    }
+
+    #[test]
+    fn rejects_path_like_intervals() {
+        let store = ParquetStore::new("/data");
+        assert!(matches!(
+            store.path(&btc(), "../1h"),
+            Err(DataError::InvalidInterval(_))
+        ));
+    }
+
+    #[test]
     fn missing_file_is_none() {
-        let store = Store::new(temp_dir("missing"));
-        assert!(store.load("NOPE", "1h").expect("load").is_none());
+        let store = ParquetStore::new(temp_dir("missing"));
+        assert!(store.load(&btc(), "1h").expect("load").is_none());
+    }
+
+    #[test]
+    fn migrates_flat_files_into_venue_directory() {
+        let dir = temp_dir("migrate");
+        write_parquet(&dir.join("BTCUSDT-1h.parquet"), &[bar(0, 1.0)]).expect("write");
+        let store = ParquetStore::new(&dir);
+        let venue = VenueId::new("binance").expect("valid venue");
+
+        assert_eq!(store.migrate_flat_layout(&venue).expect("migrate"), 1);
+        assert!(!dir.join("BTCUSDT-1h.parquet").exists());
+        assert!(store.load(&btc(), "1h").expect("load").is_some());
+        assert_eq!(store.migrate_flat_layout(&venue).expect("idempotent"), 0);
     }
 
     #[test]
@@ -204,5 +296,48 @@ mod tests {
             read_parquet(&path),
             Err(DataError::Corrupt { .. })
         ));
+    }
+
+    #[test]
+    fn perpetuals_round_trip_separately_from_spot() {
+        let store = ParquetStore::new(temp_dir("perp"));
+        let perp: InstrumentId = "binance:BTCUSDT:perp".parse().expect("valid instrument");
+        store
+            .save(&Series::new(perp.clone(), vec![bar(0, 5.0)]), "1h")
+            .expect("save");
+        assert!(store.load(&perp, "1h").expect("load").is_some());
+        assert!(store.load(&btc(), "1h").expect("load").is_none());
+    }
+
+    #[test]
+    fn missing_columns_are_reported_as_corrupt() {
+        let dir = temp_dir("columns");
+        fs::create_dir_all(&dir).expect("create dir");
+        let path = dir.join("bad.parquet");
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "ts",
+            DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
+            false,
+        )]));
+        let ts = TimestampMillisecondArray::from(vec![0_i64]).with_timezone("UTC");
+        let batch = RecordBatch::try_new(Arc::clone(&schema), vec![Arc::new(ts)]).expect("batch");
+        let mut writer = ArrowWriter::try_new(File::create(&path).expect("create"), schema, None)
+            .expect("writer");
+        writer.write(&batch).expect("write");
+        writer.close().expect("close");
+
+        assert!(matches!(
+            read_parquet(&path),
+            Err(DataError::Corrupt { .. })
+        ));
+    }
+
+    #[test]
+    fn invalid_interval_is_refused_through_the_port() {
+        let store = ParquetStore::new(temp_dir("port-interval"));
+        let err = store
+            .save(&Series::new(btc(), vec![bar(0, 1.0)]), "1 h")
+            .expect_err("invalid interval");
+        assert!(matches!(err, PortError::Adapter { .. }));
     }
 }

@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 
 use crate::broker::SimBroker;
+use crate::instrument::InstrumentId;
 use crate::metrics::Report;
 use crate::risk::{RiskLimits, RiskManager};
 use crate::strategy::Strategy;
@@ -48,9 +49,9 @@ pub fn run(strategy: &mut dyn Strategy, series: &[Series], cfg: &BacktestConfig)
 /// nothing is executed or recorded. A target set on the last warm-up bar executes at
 /// the first measured bar's open.
 ///
-/// All symbols are merged onto one timeline. Per timestamp: execute pending targets at
-/// each symbol's open, mark everything at the close, update risk, record equity, then
-/// ask the strategy for new targets, which are queued for each symbol's next bar.
+/// All instruments are merged onto one timeline. Per timestamp: execute pending targets at
+/// each instrument's open, mark everything at the close, update risk, record equity, then
+/// ask the strategy for new targets, which are queued for each instrument's next bar.
 /// Trades only happen when a risk-adjusted target actually changes, so there is no
 /// churn from price drift.
 pub fn run_from(
@@ -66,14 +67,14 @@ pub fn run_from(
         .collect();
     events.sort_by_key(|&(i, bar)| (bar.ts, i));
 
-    let symbols: Vec<&str> = series.iter().map(|s| s.symbol.as_str()).collect();
+    let instruments: Vec<&InstrumentId> = series.iter().map(|s| &s.instrument).collect();
     let mut broker = SimBroker::new(cfg.initial_cash, cfg.fee_rate, cfg.slippage_bps);
     let mut risk = RiskManager::new(cfg.risk);
     let mut benchmark = Benchmark::new(series, cfg.initial_cash);
 
     let mut desired = BTreeMap::new();
-    let mut current: BTreeMap<String, f64> = BTreeMap::new();
-    let mut pending: BTreeMap<String, f64> = BTreeMap::new();
+    let mut current: BTreeMap<InstrumentId, f64> = BTreeMap::new();
+    let mut pending: BTreeMap<InstrumentId, f64> = BTreeMap::new();
     let mut fills = Vec::new();
     let mut equity_curve = Vec::new();
     let mut benchmark_curve = Vec::new();
@@ -86,12 +87,12 @@ pub fn run_from(
 
         if measure_from.is_none_or(|start| ts >= start) {
             for &(i, bar) in group {
-                let symbol = symbols[i];
-                if let Some(target) = pending.remove(symbol) {
-                    fills.extend(broker.rebalance(symbol, bar.ts, bar.open, target));
-                    current.insert(symbol.to_owned(), target);
+                let instrument = instruments[i];
+                if let Some(target) = pending.remove(instrument) {
+                    fills.extend(broker.rebalance(instrument, bar.ts, bar.open, target));
+                    current.insert(instrument.clone(), target);
                 }
-                broker.mark(symbol, bar.close);
+                broker.mark(instrument, bar.close);
                 benchmark.observe(i, bar);
             }
             let equity = broker.equity();
@@ -104,16 +105,16 @@ pub fn run_from(
         }
 
         for &(i, bar) in group {
-            if let Some(target) = strategy.on_bar(symbols[i], bar) {
-                desired.insert(symbols[i].to_owned(), target);
+            if let Some(target) = strategy.on_bar(instruments[i], bar) {
+                desired.insert(instruments[i].clone(), target);
             }
         }
-        for (symbol, target) in risk.apply(&desired) {
-            let held = current.get(&symbol).copied().unwrap_or(0.0);
+        for (instrument, target) in risk.apply(&desired) {
+            let held = current.get(&instrument).copied().unwrap_or(0.0);
             if (target - held).abs() > f64::EPSILON {
-                pending.insert(symbol, target);
+                pending.insert(instrument, target);
             } else {
-                pending.remove(&symbol);
+                pending.remove(&instrument);
             }
         }
     }
@@ -127,7 +128,7 @@ pub fn run_from(
     }
 }
 
-/// Equal-weight buy & hold: each symbol gets `1/n` of capital at its first measured open.
+/// Equal-weight buy & hold: each instrument gets `1/n` of capital at its first measured open.
 #[derive(Debug)]
 struct Benchmark {
     initial: f64,
@@ -158,7 +159,7 @@ impl Benchmark {
         self.last[i] = bar.close;
     }
 
-    /// Symbols not yet entered are held as cash.
+    /// Instruments not yet entered are held as cash.
     fn value(&self) -> f64 {
         let growth: f64 = self
             .entry
@@ -173,7 +174,7 @@ impl Benchmark {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::strategies::{BuyAndHold, PerSymbol};
+    use crate::strategies::{BuyAndHold, PerInstrument};
 
     fn at(hours: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(hours * 3_600, 0).expect("valid timestamp")
@@ -192,7 +193,10 @@ mod tests {
                 volume: 1.0,
             })
             .collect();
-        Series::new(symbol, bars)
+        Series::new(
+            InstrumentId::spot("test", symbol).expect("valid instrument"),
+            bars,
+        )
     }
 
     fn frictionless() -> BacktestConfig {
@@ -238,12 +242,12 @@ mod tests {
     }
 
     #[test]
-    fn per_symbol_splits_capital() {
+    fn per_instrument_splits_capital() {
         let data = [
             series("A", &[(100.0, 100.0), (100.0, 100.0)]),
             series("B", &[(10.0, 10.0), (10.0, 10.0)]),
         ];
-        let mut strategy = PerSymbol::new(BuyAndHold::default(), data.len());
+        let mut strategy = PerInstrument::new(BuyAndHold::default(), data.len());
         let result = run(&mut strategy, &data, &frictionless());
 
         assert_eq!(result.fills.len(), 2);
@@ -285,5 +289,121 @@ mod tests {
         assert!(result.fills.is_empty());
         assert_eq!(result.report.trades, 0);
         assert!((result.report.end_equity - 1_000.0).abs() < 1e-9);
+    }
+
+    /// Wants full exposure to every instrument on every bar.
+    #[derive(Debug)]
+    struct AlwaysLong;
+
+    impl Strategy for AlwaysLong {
+        fn name(&self) -> &'static str {
+            "always-long"
+        }
+
+        fn on_bar(&mut self, _instrument: &InstrumentId, _bar: &Bar) -> Option<f64> {
+            Some(1.0)
+        }
+    }
+
+    /// Records the timestamp of every bar it is shown.
+    #[derive(Debug, Default)]
+    struct Recorder {
+        seen: Vec<DateTime<Utc>>,
+    }
+
+    impl Strategy for Recorder {
+        fn name(&self) -> &'static str {
+            "recorder"
+        }
+
+        fn on_bar(&mut self, _instrument: &InstrumentId, bar: &Bar) -> Option<f64> {
+            self.seen.push(bar.ts);
+            None
+        }
+    }
+
+    fn bars_at(symbol: &str, bars: &[(i64, f64, f64)]) -> Series {
+        let bars = bars
+            .iter()
+            .map(|&(hour, open, close)| Bar {
+                ts: at(hour),
+                open,
+                high: open.max(close),
+                low: open.min(close),
+                close,
+                volume: 1.0,
+            })
+            .collect();
+        Series::new(
+            InstrumentId::spot("test", symbol).expect("valid instrument"),
+            bars,
+        )
+    }
+
+    #[test]
+    fn gross_exposure_cap_splits_capital_between_instruments() {
+        let data = [
+            series("A", &[(100.0, 100.0), (100.0, 100.0)]),
+            series("B", &[(10.0, 10.0), (10.0, 10.0)]),
+        ];
+        let result = run(&mut AlwaysLong, &data, &frictionless());
+        assert_eq!(result.fills.len(), 2);
+        for fill in &result.fills {
+            assert!(
+                fill.qty.mul_add(fill.price, -500.0).abs() < 1e-6,
+                "{fill:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn kill_switch_flattens_on_the_next_bar() {
+        let data = [series(
+            "A",
+            &[
+                (100.0, 100.0),
+                (100.0, 100.0),
+                (100.0, 85.0),
+                (85.0, 85.0),
+                (85.0, 85.0),
+            ],
+        )];
+        let cfg = BacktestConfig {
+            risk: RiskLimits::default(),
+            ..frictionless()
+        };
+        let result = run(&mut BuyAndHold::default(), &data, &cfg);
+
+        assert_eq!(result.fills.len(), 2, "{:?}", result.fills);
+        assert_eq!(result.fills[0].side, crate::types::Side::Buy);
+        assert_eq!(result.fills[1].side, crate::types::Side::Sell);
+        assert_eq!(result.fills[1].ts, at(3));
+    }
+
+    #[test]
+    fn late_instrument_is_held_as_cash_in_the_benchmark() {
+        let data = [
+            bars_at(
+                "A",
+                &[(0, 100.0, 100.0), (1, 100.0, 100.0), (2, 100.0, 100.0)],
+            ),
+            bars_at("B", &[(1, 10.0, 10.0), (2, 10.0, 20.0)]),
+        ];
+        let result = run(&mut Recorder::default(), &data, &frictionless());
+        assert!((result.report.benchmark.total_return - 0.5).abs() < 1e-9);
+        assert!(result.report.strategy.total_return.abs() < 1e-9);
+    }
+
+    #[test]
+    fn strategy_sees_bars_in_time_order_across_instruments() {
+        let data = [
+            bars_at("A", &[(0, 1.0, 1.0), (2, 1.0, 1.0), (4, 1.0, 1.0)]),
+            bars_at("B", &[(1, 1.0, 1.0), (2, 1.0, 1.0), (3, 1.0, 1.0)]),
+        ];
+        let mut recorder = Recorder::default();
+        run(&mut recorder, &data, &frictionless());
+
+        assert_eq!(recorder.seen.len(), 6);
+        assert!(recorder.seen.windows(2).all(|w| w[0] <= w[1]));
     }
 }

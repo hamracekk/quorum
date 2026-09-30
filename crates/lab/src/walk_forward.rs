@@ -154,7 +154,7 @@ fn scaled(curve: &[EquityPoint], scale: f64) -> impl Iterator<Item = EquityPoint
 #[cfg(test)]
 pub(crate) mod tests {
     use trader_core::strategies::SmaCross;
-    use trader_core::{Bar, Strategy};
+    use trader_core::{Bar, InstrumentId, Strategy};
 
     use super::*;
 
@@ -175,7 +175,10 @@ pub(crate) mod tests {
                 }
             })
             .collect();
-        Series::new(symbol, bars)
+        Series::new(
+            InstrumentId::spot("test", symbol).expect("valid instrument"),
+            bars,
+        )
     }
 
     fn factory(&(fast, slow): &(usize, usize)) -> Box<dyn Strategy> {
@@ -265,5 +268,45 @@ pub(crate) mod tests {
             .map(|w| 1.0 + w.test.strategy.total_return)
             .product();
         assert!((report.out_of_sample.strategy.total_return - (compounded - 1.0)).abs() < 1e-9);
+    }
+
+    fn wf_40_20() -> WalkForwardConfig {
+        WalkForwardConfig {
+            train_bars: 40,
+            test_bars: 20,
+        }
+    }
+
+    #[test]
+    fn chosen_params_score_best_on_their_training_window() {
+        let data = [trending_series("A", 100)];
+        let cfg = BacktestConfig::default();
+        let report = walk_forward(&GRID, &factory, &data, &cfg, wf_40_20()).expect("enough data");
+        for window in &report.windows {
+            let train = slice_all(&data, window.train_start, window.test_start);
+            let best = crate::sweep(&GRID, &factory, &train, &cfg);
+            assert!((best[0].report.strategy.sharpe - window.train_sharpe).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn later_data_cannot_change_earlier_windows() {
+        let original = [trending_series("A", 100)];
+        let mut altered = original.clone();
+        for bar in &mut altered[0].bars[80..] {
+            bar.open *= 3.0;
+            bar.high *= 3.0;
+            bar.low *= 3.0;
+            bar.close *= 3.0;
+        }
+        let cfg = BacktestConfig::default();
+        let a = walk_forward(&GRID, &factory, &original, &cfg, wf_40_20()).expect("enough data");
+        let b = walk_forward(&GRID, &factory, &altered, &cfg, wf_40_20()).expect("enough data");
+
+        // Windows 0 and 1 end before bar 80; only window 2 may see the change.
+        for i in 0..2 {
+            assert_eq!(a.windows[i].params, b.windows[i].params);
+            assert!((a.windows[i].test.end_equity - b.windows[i].test.end_equity).abs() < 1e-9);
+        }
     }
 }

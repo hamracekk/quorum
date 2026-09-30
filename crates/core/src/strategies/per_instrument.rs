@@ -1,44 +1,47 @@
 use std::collections::BTreeMap;
 
+use crate::instrument::InstrumentId;
 use crate::strategy::Strategy;
 use crate::types::Bar;
 
-/// Runs an independent copy of a single-asset strategy for every symbol and gives
-/// each an equal share of equity (`1 / symbols`).
+/// Runs an independent copy of a single-asset strategy for every instrument and gives
+/// each an equal share of equity (`1 / instruments`).
 #[derive(Debug, Clone)]
-pub struct PerSymbol<S> {
+pub struct PerInstrument<S> {
     template: S,
     weight: f64,
-    instances: BTreeMap<String, S>,
+    instances: BTreeMap<InstrumentId, S>,
 }
 
-impl<S: Strategy + Clone> PerSymbol<S> {
-    pub fn new(template: S, symbols: usize) -> Self {
+impl<S: Strategy + Clone> PerInstrument<S> {
+    pub fn new(template: S, instruments: usize) -> Self {
         Self {
             template,
-            weight: if symbols == 0 {
+            weight: if instruments == 0 {
                 0.0
             } else {
-                1.0 / symbols as f64
+                1.0 / instruments as f64
             },
             instances: BTreeMap::new(),
         }
     }
 }
 
-impl<S: Strategy + Clone> Strategy for PerSymbol<S> {
+impl<S: Strategy + Clone> Strategy for PerInstrument<S> {
     fn name(&self) -> &str {
         self.template.name()
     }
 
-    fn on_bar(&mut self, symbol: &str, bar: &Bar) -> Option<f64> {
+    fn on_bar(&mut self, instrument: &InstrumentId, bar: &Bar) -> Option<f64> {
         let weight = self.weight;
         let template = &self.template;
         let instance = self
             .instances
-            .entry(symbol.to_owned())
+            .entry(instrument.clone())
             .or_insert_with(|| template.clone());
-        instance.on_bar(symbol, bar).map(|target| target * weight)
+        instance
+            .on_bar(instrument, bar)
+            .map(|target| target * weight)
     }
 }
 
@@ -48,6 +51,10 @@ mod tests {
 
     use super::*;
     use crate::strategies::BuyAndHold;
+
+    fn id(symbol: &str) -> InstrumentId {
+        InstrumentId::spot("test", symbol).expect("valid instrument")
+    }
 
     fn bar() -> Bar {
         Bar {
@@ -61,12 +68,12 @@ mod tests {
     }
 
     #[test]
-    fn each_symbol_has_its_own_state() {
-        let mut strategy = PerSymbol::new(BuyAndHold::default(), 4);
-        let a = strategy.on_bar("A", &bar()).expect("A enters");
-        let b = strategy.on_bar("B", &bar()).expect("B enters");
+    fn each_instrument_has_its_own_state() {
+        let mut strategy = PerInstrument::new(BuyAndHold::default(), 4);
+        let a = strategy.on_bar(&id("A"), &bar()).expect("A enters");
+        let b = strategy.on_bar(&id("B"), &bar()).expect("B enters");
         assert!((a - 0.25).abs() < 1e-12);
         assert!((b - 0.25).abs() < 1e-12);
-        assert!(strategy.on_bar("A", &bar()).is_none());
+        assert!(strategy.on_bar(&id("A"), &bar()).is_none());
     }
 }

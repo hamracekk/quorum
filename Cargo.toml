@@ -9,6 +9,7 @@ publish = false
 
 [workspace.dependencies]
 anyhow = "1"
+async-trait = "0.1"
 arrow-array = "60"
 arrow-schema = "60"
 chrono = { version = "0.4", features = ["serde"] }
@@ -16,12 +17,14 @@ clap = { version = "4", features = ["derive"] }
 config = { version = "0.15", default-features = false, features = ["toml"] }
 csv = "1"
 parquet = { version = "60", default-features = false, features = ["arrow", "snap"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+wiremock = "0.6"
 trader-core = { path = "crates/core" }
 trader-data = { path = "crates/data" }
 trader-lab = { path = "crates/lab" }
