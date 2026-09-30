@@ -1,0 +1,13 @@
+[package]
+name = "trader-lab"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono.workspace = true
+thiserror.workspace = true
+trader-core.workspace = true
+
+[lints]
+workspace = true

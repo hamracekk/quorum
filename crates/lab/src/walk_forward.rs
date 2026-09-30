@@ -1,0 +1,269 @@
+use chrono::{DateTime, Utc};
+use trader_core::{BacktestConfig, BacktestResult, EquityPoint, Report, Series, run, run_from};
+
+use crate::{LabError, StrategyFactory, slice_all};
+
+#[derive(Debug, Clone, Copy)]
+pub struct WalkForwardConfig {
+    /// Timestamps used to choose parameters in each window.
+    pub train_bars: usize,
+    /// Timestamps traded out-of-sample after each training window; also the step size.
+    pub test_bars: usize,
+}
+
+/// One train/test split.
+#[derive(Debug, Clone)]
+pub struct Window<P> {
+    pub train_start: DateTime<Utc>,
+    pub test_start: DateTime<Utc>,
+    pub test_end: DateTime<Utc>,
+    /// Parameters that scored best on the training window.
+    pub params: P,
+    pub train_sharpe: f64,
+    /// Out-of-sample result of `params` on the test window.
+    pub test: Report,
+}
+
+#[derive(Debug, Clone)]
+pub struct WalkForwardReport<P> {
+    pub windows: Vec<Window<P>>,
+    /// All test windows chained into one out-of-sample equity curve.
+    pub out_of_sample: Report,
+}
+
+/// Rolling walk-forward evaluation.
+///
+/// For each window: backtest every parameter set on `train_bars`, pick the best Sharpe,
+/// then trade it on the next `test_bars` (with the training bars as indicator warm-up
+/// only). Windows advance by `test_bars`, so test periods never overlap and no test bar
+/// is ever used for choosing parameters.
+pub fn walk_forward<P: Clone>(
+    grid: &[P],
+    factory: &impl StrategyFactory<P>,
+    series: &[Series],
+    cfg: &BacktestConfig,
+    wf: WalkForwardConfig,
+) -> Result<WalkForwardReport<P>, LabError> {
+    if grid.is_empty() {
+        return Err(LabError::EmptyGrid);
+    }
+    if wf.train_bars == 0 || wf.test_bars == 0 {
+        return Err(LabError::EmptyWindow);
+    }
+    let stamps = timeline(series);
+    let needed = wf.train_bars + wf.test_bars;
+    if stamps.len() < needed {
+        return Err(LabError::NotEnoughData {
+            needed,
+            available: stamps.len(),
+        });
+    }
+
+    let mut windows = Vec::new();
+    let mut results = Vec::new();
+    let mut start = 0;
+    while start + needed <= stamps.len() {
+        let train_start = stamps[start];
+        let test_start = stamps[start + wf.train_bars];
+        let test_end = stamps[start + needed - 1];
+        let after_test = stamps
+            .get(start + needed)
+            .copied()
+            .unwrap_or(DateTime::<Utc>::MAX_UTC);
+
+        let train = slice_all(series, train_start, test_start);
+        let (params, train_sharpe) = best_params(grid, factory, &train, cfg);
+
+        let full = slice_all(series, train_start, after_test);
+        let mut strategy = factory.build(&params);
+        let result = run_from(strategy.as_mut(), &full, cfg, Some(test_start));
+
+        windows.push(Window {
+            train_start,
+            test_start,
+            test_end,
+            params,
+            train_sharpe,
+            test: result.report.clone(),
+        });
+        results.push(result);
+        start += wf.test_bars;
+    }
+
+    Ok(WalkForwardReport {
+        windows,
+        out_of_sample: stitch(&results, cfg.initial_cash),
+    })
+}
+
+/// Sorted, de-duplicated timestamps across all series.
+fn timeline(series: &[Series]) -> Vec<DateTime<Utc>> {
+    let mut stamps: Vec<DateTime<Utc>> = series
+        .iter()
+        .flat_map(|s| s.bars.iter().map(|b| b.ts))
+        .collect();
+    stamps.sort_unstable();
+    stamps.dedup();
+    stamps
+}
+
+fn best_params<P: Clone>(
+    grid: &[P],
+    factory: &impl StrategyFactory<P>,
+    train: &[Series],
+    cfg: &BacktestConfig,
+) -> (P, f64) {
+    let mut best: Option<(&P, f64)> = None;
+    for params in grid {
+        let mut strategy = factory.build(params);
+        let sharpe = run(strategy.as_mut(), train, cfg).report.strategy.sharpe;
+        if best.is_none_or(|(_, top)| sharpe > top) {
+            best = Some((params, sharpe));
+        }
+    }
+    // `grid` is non-empty (checked by the caller), so `best` is always set.
+    best.map_or_else(|| (grid[0].clone(), 0.0), |(p, s)| (p.clone(), s))
+}
+
+/// Chain test windows as if the capital rolled from one into the next.
+fn stitch(results: &[BacktestResult], initial: f64) -> Report {
+    let mut curve = Vec::new();
+    let mut benchmark = Vec::new();
+    let mut fills = Vec::new();
+    let (mut scale, mut bench_scale) = (1.0, 1.0);
+
+    for result in results {
+        curve.extend(scaled(&result.equity_curve, scale));
+        benchmark.extend(scaled(&result.benchmark_curve, bench_scale));
+        fills.extend(result.fills.iter().cloned());
+        if initial > 0.0 {
+            scale *= result.equity_curve.last().map_or(initial, |p| p.equity) / initial;
+            bench_scale *= result.benchmark_curve.last().map_or(initial, |p| p.equity) / initial;
+        }
+    }
+    Report::compute(initial, &curve, &benchmark, &fills)
+}
+
+fn scaled(curve: &[EquityPoint], scale: f64) -> impl Iterator<Item = EquityPoint> + '_ {
+    curve.iter().map(move |p| EquityPoint {
+        ts: p.ts,
+        equity: p.equity * scale,
+    })
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use trader_core::strategies::SmaCross;
+    use trader_core::{Bar, Strategy};
+
+    use super::*;
+
+    /// Deterministic zig-zag uptrend: +1% per bar with a pullback every 7th bar.
+    pub(crate) fn trending_series(symbol: &str, len: i64) -> Series {
+        let mut price = 100.0;
+        let bars = (0..len)
+            .map(|i| {
+                let open = price;
+                price *= if i % 7 == 6 { 0.97 } else { 1.01 };
+                Bar {
+                    ts: DateTime::from_timestamp(i * 3_600, 0).expect("valid timestamp"),
+                    open,
+                    high: open.max(price),
+                    low: open.min(price),
+                    close: price,
+                    volume: 1.0,
+                }
+            })
+            .collect();
+        Series::new(symbol, bars)
+    }
+
+    fn factory(&(fast, slow): &(usize, usize)) -> Box<dyn Strategy> {
+        Box::new(SmaCross::new(fast, slow, false))
+    }
+
+    const GRID: [(usize, usize); 2] = [(2, 5), (3, 10)];
+
+    #[test]
+    fn windows_tile_the_data_without_overlap() {
+        let data = [trending_series("A", 100)];
+        let wf = WalkForwardConfig {
+            train_bars: 40,
+            test_bars: 20,
+        };
+        let report = walk_forward(&GRID, &factory, &data, &BacktestConfig::default(), wf)
+            .expect("enough data");
+
+        assert_eq!(report.windows.len(), 3);
+        for pair in report.windows.windows(2) {
+            assert!(pair[0].test_end < pair[1].test_start);
+        }
+        for window in &report.windows {
+            assert!(window.train_start < window.test_start);
+        }
+    }
+
+    #[test]
+    fn test_windows_start_trading_at_test_start() {
+        let data = [trending_series("A", 100)];
+        let wf = WalkForwardConfig {
+            train_bars: 40,
+            test_bars: 20,
+        };
+        let report = walk_forward(&GRID, &factory, &data, &BacktestConfig::default(), wf)
+            .expect("enough data");
+        let first = &report.windows[0];
+        assert_eq!(
+            first.test_start,
+            DateTime::from_timestamp(40 * 3_600, 0).expect("valid timestamp")
+        );
+    }
+
+    #[test]
+    fn rejects_too_little_data() {
+        let data = [trending_series("A", 10)];
+        let wf = WalkForwardConfig {
+            train_bars: 8,
+            test_bars: 5,
+        };
+        let err = walk_forward(&GRID, &factory, &data, &BacktestConfig::default(), wf)
+            .expect_err("too short");
+        assert!(matches!(
+            err,
+            LabError::NotEnoughData {
+                needed: 13,
+                available: 10
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_grid() {
+        let data = [trending_series("A", 100)];
+        let wf = WalkForwardConfig {
+            train_bars: 40,
+            test_bars: 20,
+        };
+        let empty: [(usize, usize); 0] = [];
+        let err = walk_forward(&empty, &factory, &data, &BacktestConfig::default(), wf)
+            .expect_err("empty grid");
+        assert!(matches!(err, LabError::EmptyGrid));
+    }
+
+    #[test]
+    fn stitching_compounds_window_returns() {
+        let data = [trending_series("A", 100)];
+        let wf = WalkForwardConfig {
+            train_bars: 40,
+            test_bars: 20,
+        };
+        let report = walk_forward(&GRID, &factory, &data, &BacktestConfig::default(), wf)
+            .expect("enough data");
+        let compounded: f64 = report
+            .windows
+            .iter()
+            .map(|w| 1.0 + w.test.strategy.total_return)
+            .product();
+        assert!((report.out_of_sample.strategy.total_return - (compounded - 1.0)).abs() < 1e-9);
+    }
+}

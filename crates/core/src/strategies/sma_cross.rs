@@ -57,7 +57,7 @@ impl Strategy for SmaCross {
         "sma-cross"
     }
 
-    fn on_bar(&mut self, bar: &Bar) -> Option<f64> {
+    fn on_bar(&mut self, _symbol: &str, bar: &Bar) -> Option<f64> {
         let fast = self.fast.push(bar.close);
         let slow = self.slow.push(bar.close);
         let (fast, slow) = (fast?, slow?);
