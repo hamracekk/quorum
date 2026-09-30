@@ -18,7 +18,9 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use sqlx::Row;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
-use trader_core::{Event, Fill, InstrumentId, Journal, PortError, RunInfo, RunKind, Side};
+use trader_core::{
+    AgentCall, Event, Fill, InstrumentId, Journal, PortError, RunInfo, RunKind, Side,
+};
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
@@ -187,6 +189,50 @@ impl SqliteJournal {
     }
 }
 
+impl SqliteJournal {
+    async fn insert_agent_call(&self, call: &AgentCall) -> Result<(), JournalError> {
+        sqlx::query(
+            "INSERT INTO agent_calls (ts, agent, tool, arguments, ok, summary, duration_ms) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(format_ts(call.ts))
+        .bind(&call.agent)
+        .bind(&call.tool)
+        .bind(&call.arguments)
+        .bind(call.ok)
+        .bind(&call.summary)
+        .bind(i64::try_from(call.duration_ms).unwrap_or(i64::MAX))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn select_agent_calls(&self, limit: usize) -> Result<Vec<AgentCall>, JournalError> {
+        let rows = sqlx::query(
+            "SELECT ts, agent, tool, arguments, ok, summary, duration_ms \
+             FROM agent_calls ORDER BY id DESC LIMIT ?",
+        )
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                let ts: String = row.try_get("ts")?;
+                let duration: i64 = row.try_get("duration_ms")?;
+                Ok(AgentCall {
+                    ts: parse_ts(&ts)?,
+                    agent: row.try_get("agent")?,
+                    tool: row.try_get("tool")?,
+                    arguments: row.try_get("arguments")?,
+                    ok: row.try_get("ok")?,
+                    summary: row.try_get("summary")?,
+                    duration_ms: u64::try_from(duration).unwrap_or(0),
+                })
+            })
+            .collect()
+    }
+}
+
 fn port(err: JournalError) -> PortError {
     PortError::adapter("sqlite journal", err)
 }
@@ -207,6 +253,14 @@ impl Journal for SqliteJournal {
 
     async fn fills(&self, run_id: &str) -> Result<Vec<Fill>, PortError> {
         self.select_fills(run_id).await.map_err(port)
+    }
+
+    async fn record_agent_call(&self, call: &AgentCall) -> Result<(), PortError> {
+        self.insert_agent_call(call).await.map_err(port)
+    }
+
+    async fn agent_calls(&self, limit: usize) -> Result<Vec<AgentCall>, PortError> {
+        self.select_agent_calls(limit).await.map_err(port)
     }
 }
 
@@ -395,5 +449,40 @@ mod tests {
             .await
             .expect("reopen (migrations idempotent)");
         assert_eq!(reopened.fills("r1").await.expect("fills").len(), 2);
+    }
+
+    fn agent_call(hour: i64, tool: &str, ok: bool) -> AgentCall {
+        AgentCall {
+            ts: at(hour),
+            agent: "claude-code".into(),
+            tool: tool.into(),
+            arguments: r#"{"fast":20}"#.into(),
+            ok,
+            summary: if ok { "fine".into() } else { "boom".into() },
+            duration_ms: 42,
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_calls_round_trip_newest_first_with_a_limit() {
+        let journal = SqliteJournal::in_memory().await.expect("journal");
+        for (hour, tool, ok) in [
+            (0, "backtest", true),
+            (1, "sweep", false),
+            (2, "walk_forward", true),
+        ] {
+            journal
+                .record_agent_call(&agent_call(hour, tool, ok))
+                .await
+                .expect("record");
+        }
+        let calls = journal.agent_calls(2).await.expect("calls");
+        assert_eq!(
+            calls,
+            vec![
+                agent_call(2, "walk_forward", true),
+                agent_call(1, "sweep", false)
+            ]
+        );
     }
 }
