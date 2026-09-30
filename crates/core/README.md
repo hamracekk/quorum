@@ -11,13 +11,15 @@ depends on no internal crate.
 |---|---|
 | `instrument.rs` | `InstrumentId { venue, symbol, kind }`, `VenueId`, `InstrumentKind`; validated; text form `venue:SYMBOL[:kind]` |
 | `types.rs` | `Bar` (keyed by **open** time), `Series` (one instrument's bars), `Fill`, `Side`, `EquityPoint` |
-| `ports.rs` | Port traits `MarketData` (async), `BarStore`, and `PortError` (ADR 0001) |
-| `fakes.rs` | In-memory `MemoryMarketData` and `MemoryBarStore` for tests in any crate |
+| `events.rs` | `Event` (bar, signal, target, fill, risk_halt; tagged JSON) and `Envelope` (with log `seq`) |
+| `engine.rs` | `Engine`: event-driven core — bars in (time order), decision events out; used by backtest, replay and live |
+| `ports.rs` | Port traits `MarketData` (async), `BarStore`, `EventLog`, `Journal` (async), `RunInfo`/`RunKind`, `PortError` |
+| `fakes.rs` | In-memory `MemoryMarketData`, `MemoryBarStore`, `MemoryEventLog` for tests in any crate |
 | `strategy.rs` | `Strategy` trait: returns target exposure per instrument on each closed bar |
 | `strategies/` | `SmaCross`, `BuyAndHold`, `PerInstrument` (runs a single-asset strategy per instrument, equal weight), `Sma` |
 | `broker.rs` | `SimBroker`: multi-instrument positions, fees, slippage, min notional |
 | `risk.rs` | `RiskLimits`, `RiskManager`: per-instrument and gross exposure caps, daily-loss kill switch |
-| `backtest.rs` | `run` / `run_from` (warm-up), equal-weight `Benchmark`, `BacktestConfig`, `BacktestResult` |
+| `backtest.rs` | `run` / `run_from` (warm-up) / `run_with_events`: merge series and feed the `Engine`; `BacktestConfig`, `BacktestResult` |
 | `metrics.rs` | `Performance` (return, CAGR, drawdown, Sharpe), `Report` (strategy vs benchmark, `Display`) |
 
 ## Invariants — never break these
@@ -29,6 +31,8 @@ depends on no internal crate.
 - **Targets are fractions of total equity**, clamped by risk before execution. Trades happen only
   when the risk-adjusted target changes (no drift churn).
 - **The benchmark is pure**: equal-weight buy & hold, no fees, no risk limits.
+- **One engine**: never add a second simulation loop — backtest, replay and live all use `Engine`.
+- **Strategies are `Send`** so the daemon can run them on async tasks.
 - **Determinism**: `BTreeMap` everywhere order matters; no randomness, no wall clock.
 - **No I/O here.** Adapters live in other crates and implement the ports.
 
