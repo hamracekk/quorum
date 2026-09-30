@@ -6,8 +6,9 @@ use std::sync::{Mutex, PoisonError};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
+use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
-use crate::ports::{BarStore, MarketData, PortError};
+use crate::ports::{BarStore, EventLog, MarketData, PortError};
 use crate::types::{Bar, Series};
 
 /// A recorded `MarketData::bars` call: instrument, start, end.
@@ -109,6 +110,36 @@ impl BarStore for MemoryBarStore {
     }
 }
 
+/// Keeps the event log in memory; sequence numbers start at 1.
+#[derive(Debug, Default)]
+pub struct MemoryEventLog {
+    entries: Mutex<Vec<Envelope>>,
+}
+
+impl EventLog for MemoryEventLog {
+    fn append(&self, event: &Event) -> Result<Envelope, PortError> {
+        let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
+        let envelope = Envelope {
+            seq: entries.len() as u64 + 1,
+            event: event.clone(),
+        };
+        entries.push(envelope.clone());
+        drop(entries);
+        Ok(envelope)
+    }
+
+    fn read(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<Envelope>, PortError> {
+        Ok(self
+            .entries
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|e| e.event.ts() >= start && e.event.ts() < end)
+            .cloned()
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +199,24 @@ mod tests {
             store.save(&unsorted, "1h"),
             Err(PortError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn event_log_assigns_increasing_sequence_numbers_and_filters_by_time() {
+        let log = MemoryEventLog::default();
+        for (hour, seq) in (0..4).zip(1_u64..) {
+            let event = Event::RiskHalt {
+                ts: at(hour),
+                equity: 1.0,
+            };
+            assert_eq!(log.append(&event).expect("append").seq, seq);
+        }
+        let seqs: Vec<u64> = log
+            .read(at(1), at(3))
+            .expect("read")
+            .iter()
+            .map(|e| e.seq)
+            .collect();
+        assert_eq!(seqs, vec![2, 3]);
     }
 }

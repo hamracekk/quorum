@@ -16,7 +16,9 @@ use crate::types::Bar;
 /// Single-asset strategies ignore `instrument`; wrap them in
 /// [`PerInstrument`](crate::strategies::PerInstrument) to run them across several
 /// instruments.
-pub trait Strategy: fmt::Debug {
+///
+/// Strategies are `Send` so the daemon can run them on async tasks.
+pub trait Strategy: fmt::Debug + Send {
     fn name(&self) -> &str;
 
     fn on_bar(&mut self, instrument: &InstrumentId, bar: &Bar) -> Option<f64>;

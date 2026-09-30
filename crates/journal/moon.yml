@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'journal'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'trader-journal'
+  description: 'SQLite journal of runs, signals, targets, fills (sqlx, WAL, migrations)'
+dependsOn:
+  - 'core'

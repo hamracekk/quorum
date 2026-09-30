@@ -1,11 +1,10 @@
-use std::collections::BTreeMap;
-
 use chrono::{DateTime, Utc};
 
-use crate::broker::SimBroker;
+use crate::engine::Engine;
+use crate::events::Event;
 use crate::instrument::InstrumentId;
 use crate::metrics::Report;
-use crate::risk::{RiskLimits, RiskManager};
+use crate::risk::RiskLimits;
 use crate::strategy::Strategy;
 use crate::types::{Bar, EquityPoint, Fill, Series};
 
@@ -32,7 +31,7 @@ impl Default for BacktestConfig {
 #[derive(Debug, Clone)]
 pub struct BacktestResult {
     pub equity_curve: Vec<EquityPoint>,
-    /// Equal-weight buy & hold of the same symbols, without fees or risk limits.
+    /// Equal-weight buy & hold of the same instruments, without fees or risk limits.
     pub benchmark_curve: Vec<EquityPoint>,
     pub fills: Vec<Fill>,
     pub report: Report,
@@ -45,130 +44,53 @@ pub fn run(strategy: &mut dyn Strategy, series: &[Series], cfg: &BacktestConfig)
 
 /// Replay `series` through `strategy`, trading and measuring only from `measure_from`.
 ///
-/// Earlier bars are warm-up: the strategy sees them (so indicators are primed), but
-/// nothing is executed or recorded. A target set on the last warm-up bar executes at
-/// the first measured bar's open.
-///
-/// All instruments are merged onto one timeline. Per timestamp: execute pending targets at
-/// each instrument's open, mark everything at the close, update risk, record equity, then
-/// ask the strategy for new targets, which are queued for each instrument's next bar.
-/// Trades only happen when a risk-adjusted target actually changes, so there is no
-/// churn from price drift.
+/// Earlier bars are warm-up: the strategy sees them (so indicators are primed), but nothing
+/// is executed or recorded. A target set on the last warm-up bar executes at the first
+/// measured bar's open. See [`Engine`] for the per-timestamp sequence.
 pub fn run_from(
     strategy: &mut dyn Strategy,
     series: &[Series],
     cfg: &BacktestConfig,
     measure_from: Option<DateTime<Utc>>,
 ) -> BacktestResult {
-    let mut events: Vec<(usize, &Bar)> = series
+    run_with_events(strategy, series, cfg, measure_from).0
+}
+
+/// Like [`run_from`], also returning every decision event (signals, targets, fills, risk
+/// halts) in the order the engine produced them — ready for the journal.
+///
+/// All series are merged onto one timeline (by time, then by position in `series`) and fed
+/// through the same [`Engine`] that replay and live trading use.
+pub fn run_with_events(
+    strategy: &mut dyn Strategy,
+    series: &[Series],
+    cfg: &BacktestConfig,
+    measure_from: Option<DateTime<Utc>>,
+) -> (BacktestResult, Vec<Event>) {
+    let mut bars: Vec<(usize, &Bar)> = series
         .iter()
         .enumerate()
         .flat_map(|(i, s)| s.bars.iter().map(move |bar| (i, bar)))
         .collect();
-    events.sort_by_key(|&(i, bar)| (bar.ts, i));
+    bars.sort_by_key(|&(i, bar)| (bar.ts, i));
 
-    let instruments: Vec<&InstrumentId> = series.iter().map(|s| &s.instrument).collect();
-    let mut broker = SimBroker::new(cfg.initial_cash, cfg.fee_rate, cfg.slippage_bps);
-    let mut risk = RiskManager::new(cfg.risk);
-    let mut benchmark = Benchmark::new(series, cfg.initial_cash);
+    let universe: Vec<InstrumentId> = series
+        .iter()
+        .filter(|s| !s.bars.is_empty())
+        .map(|s| s.instrument.clone())
+        .collect();
+    let mut engine = Engine::new(strategy, *cfg, &universe, measure_from);
 
-    let mut desired = BTreeMap::new();
-    let mut current: BTreeMap<InstrumentId, f64> = BTreeMap::new();
-    let mut pending: BTreeMap<InstrumentId, f64> = BTreeMap::new();
-    let mut fills = Vec::new();
-    let mut equity_curve = Vec::new();
-    let mut benchmark_curve = Vec::new();
-
-    for group in events.chunk_by(|a, b| a.1.ts == b.1.ts) {
-        let Some(&(_, first)) = group.first() else {
-            continue;
-        };
-        let ts = first.ts;
-
-        if measure_from.is_none_or(|start| ts >= start) {
-            for &(i, bar) in group {
-                let instrument = instruments[i];
-                if let Some(target) = pending.remove(instrument) {
-                    fills.extend(broker.rebalance(instrument, bar.ts, bar.open, target));
-                    current.insert(instrument.clone(), target);
-                }
-                broker.mark(instrument, bar.close);
-                benchmark.observe(i, bar);
-            }
-            let equity = broker.equity();
-            risk.update(ts, equity);
-            equity_curve.push(EquityPoint { ts, equity });
-            benchmark_curve.push(EquityPoint {
-                ts,
-                equity: benchmark.value(),
-            });
-        }
-
-        for &(i, bar) in group {
-            if let Some(target) = strategy.on_bar(instruments[i], bar) {
-                desired.insert(instruments[i].clone(), target);
-            }
-        }
-        for (instrument, target) in risk.apply(&desired) {
-            let held = current.get(&instrument).copied().unwrap_or(0.0);
-            if (target - held).abs() > f64::EPSILON {
-                pending.insert(instrument, target);
-            } else {
-                pending.remove(&instrument);
-            }
-        }
+    let mut events = Vec::new();
+    for (i, bar) in bars {
+        let emitted = engine
+            .on_bar(&series[i].instrument, bar)
+            .expect("bars were sorted by time above");
+        events.extend(emitted);
     }
-
-    let report = Report::compute(cfg.initial_cash, &equity_curve, &benchmark_curve, &fills);
-    BacktestResult {
-        equity_curve,
-        benchmark_curve,
-        fills,
-        report,
-    }
-}
-
-/// Equal-weight buy & hold: each instrument gets `1/n` of capital at its first measured open.
-#[derive(Debug)]
-struct Benchmark {
-    initial: f64,
-    weight: f64,
-    entry: Vec<Option<f64>>,
-    last: Vec<f64>,
-}
-
-impl Benchmark {
-    fn new(series: &[Series], initial: f64) -> Self {
-        let active = series.iter().filter(|s| !s.bars.is_empty()).count();
-        Self {
-            initial,
-            weight: if active == 0 {
-                0.0
-            } else {
-                1.0 / active as f64
-            },
-            entry: vec![None; series.len()],
-            last: vec![0.0; series.len()],
-        }
-    }
-
-    fn observe(&mut self, i: usize, bar: &Bar) {
-        if self.entry[i].is_none() && bar.open > 0.0 {
-            self.entry[i] = Some(bar.open);
-        }
-        self.last[i] = bar.close;
-    }
-
-    /// Instruments not yet entered are held as cash.
-    fn value(&self) -> f64 {
-        let growth: f64 = self
-            .entry
-            .iter()
-            .zip(&self.last)
-            .map(|(entry, last)| self.weight * entry.map_or(1.0, |e| last / e))
-            .sum();
-        self.initial * growth
-    }
+    let (result, tail) = engine.finish();
+    events.extend(tail);
+    (result, events)
 }
 
 #[cfg(test)]

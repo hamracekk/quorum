@@ -1,0 +1,19 @@
+[package]
+name = "trader-journal"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+trader-core.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true
