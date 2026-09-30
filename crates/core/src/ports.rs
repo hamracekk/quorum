@@ -2,7 +2,7 @@
 //!
 //! Adapters (Binance, Parquet, …) live in other crates and implement these traits; the
 //! engine, lab and CLI only ever see the traits. Ports are added in the milestone that
-//! first needs them: `MarketStream` and `Broker` (M3), `LlmProvider` and `NewsSource`
+//! first needs them: `Broker` (M3b), `LlmProvider` and `NewsSource`
 //! (M5), `TraderSource` (M7), `Notifier` (integrations).
 
 use std::error::Error as StdError;
@@ -12,6 +12,7 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use futures_core::stream::BoxStream;
 use serde::Serialize;
 
 use crate::events::{Envelope, Event};
@@ -65,6 +66,24 @@ pub trait MarketData: Send + Sync + fmt::Debug {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Result<Vec<Bar>, PortError>;
+}
+
+/// A closed bar from a live stream.
+pub type StreamedBar = Result<(InstrumentId, Bar), PortError>;
+
+/// Live market data from one venue: closed bars as they complete.
+#[async_trait]
+pub trait MarketStream: Send + Sync + fmt::Debug {
+    fn venue(&self) -> &VenueId;
+
+    /// Closed bars of `instruments` in arrival order. Implementations reconnect on their own
+    /// (bars missed while disconnected are the consumer's to backfill); the stream ends when
+    /// dropped or on a fatal error. Bars still forming are never yielded.
+    async fn subscribe(
+        &self,
+        instruments: &[InstrumentId],
+        interval: &str,
+    ) -> Result<BoxStream<'static, StreamedBar>, PortError>;
 }
 
 /// Durable storage of bar series, one series per instrument and interval.
