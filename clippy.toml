@@ -1,0 +1,13 @@
+# clippy configuration for the configurable (non-boolean) lints.
+# The lint LEVELS live in the root Cargo.toml [workspace.lints]; this file only
+# tunes thresholds and MSRV-gated behaviour.
+
+# Match the pinned toolchain so clippy won't suggest APIs newer than we ship.
+msrv = "1.96.1"
+
+# Tighter than clippy's defaults (7 args / 25 cognitive complexity).
+too-many-arguments-threshold = 6
+cognitive-complexity-threshold = 20
+
+# Unpublished crates, so breaking the "public" API surface is fine.
+avoid-breaking-exported-api = false

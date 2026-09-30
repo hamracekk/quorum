@@ -86,9 +86,9 @@ mod tests {
     fn bars(prices: &[(f64, f64)]) -> Vec<Bar> {
         prices
             .iter()
-            .enumerate()
-            .map(|(i, &(open, close))| Bar {
-                ts: DateTime::from_timestamp(i as i64 * 3_600, 0).expect("valid timestamp"),
+            .zip(0_i64..)
+            .map(|(&(open, close), i)| Bar {
+                ts: DateTime::from_timestamp(i * 3_600, 0).expect("valid timestamp"),
                 open,
                 high: open.max(close),
                 low: open.min(close),

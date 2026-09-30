@@ -26,16 +26,16 @@ impl SimBroker {
         }
     }
 
-    pub fn cash(&self) -> f64 {
+    pub const fn cash(&self) -> f64 {
         self.cash
     }
 
-    pub fn position(&self) -> f64 {
+    pub const fn position(&self) -> f64 {
         self.qty
     }
 
-    pub fn equity(&self, price: f64) -> f64 {
-        self.cash + self.qty * price
+    pub const fn equity(&self, price: f64) -> f64 {
+        self.qty.mul_add(price, self.cash)
     }
 
     /// Trade toward `target` exposure (fraction of equity) at `price`.

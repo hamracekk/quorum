@@ -18,5 +18,32 @@ serde_json = "1"
 trader-core = { path = "crates/core" }
 trader-data = { path = "crates/data" }
 
+# Centralized lint policy — every crate opts in with `[lints] workspace = true`.
+# Levels are `warn` locally (so dev builds stay usable); `cargo lint` and CI pass
+# `-D warnings`, turning any of these into a hard failure.
 [workspace.lints.rust]
 unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+# Lint GROUPS get priority -1 so the specific allows below always win.
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+
+# Curated allow-list: pedantic/nursery lints that are noisy or not worth it for
+# unpublished crates. Trim this list as the code matures.
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+multiple_crate_versions = "allow" # transitive dep dupes we don't control
+cargo_common_metadata = "allow"   # unpublished crates: no readme/keywords/etc.
+# Numeric code: bar counts and seconds cast to f64 never approach 2^52.
+cast_precision_loss = "allow"
+# Conflicts with the `unreachable_pub` rustc lint above; keep `pub(crate)`.
+redundant_pub_crate = "allow"

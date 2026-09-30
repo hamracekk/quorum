@@ -117,9 +117,9 @@ mod tests {
     fn curve(values: &[f64]) -> Vec<EquityPoint> {
         values
             .iter()
-            .enumerate()
-            .map(|(i, &equity)| EquityPoint {
-                ts: DateTime::from_timestamp(i as i64 * 3_600, 0).expect("valid timestamp"),
+            .zip(0_i64..)
+            .map(|(&equity, i)| EquityPoint {
+                ts: DateTime::from_timestamp(i * 3_600, 0).expect("valid timestamp"),
                 equity,
             })
             .collect()
@@ -133,6 +133,6 @@ mod tests {
 
     #[test]
     fn flat_curve_has_zero_sharpe() {
-        assert_eq!(sharpe(&curve(&[100.0, 100.0, 100.0]), 8_760.0), 0.0);
+        assert!(sharpe(&curve(&[100.0, 100.0, 100.0]), 8_760.0).abs() < 1e-12);
     }
 }

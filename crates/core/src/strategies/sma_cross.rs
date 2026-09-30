@@ -53,7 +53,7 @@ impl SmaCross {
 }
 
 impl Strategy for SmaCross {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "sma-cross"
     }
 

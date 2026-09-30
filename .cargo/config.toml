@@ -1,0 +1,6 @@
+# Short aliases mirroring the CI gates:
+#   cargo lint       strict clippy, warnings are errors
+#   cargo fmt-check  formatting check without writing
+[alias]
+lint = "clippy --workspace --all-targets --all-features -- -D warnings"
+fmt-check = "fmt --all --check"

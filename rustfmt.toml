@@ -1,0 +1,23 @@
+# rustfmt configuration — deterministic formatting across machines.
+# Only STABLE options are set; nightly-only options live commented out below for
+# whenever `cargo +nightly fmt` is used.
+
+edition = "2024"
+max_width = 100
+newline_style = "Unix"
+use_small_heuristics = "Default"
+reorder_imports = true
+reorder_modules = true
+merge_derives = true
+use_field_init_shorthand = true
+use_try_shorthand = true
+remove_nested_parens = true
+
+# --- nightly-only (uncomment when formatting with a nightly toolchain) ---
+# group_imports = "StdExternalCrate"
+# imports_granularity = "Crate"
+# wrap_comments = true
+# comment_width = 100
+# format_code_in_doc_comments = true
+# normalize_comments = true
+# normalize_doc_attributes = true

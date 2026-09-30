@@ -8,7 +8,7 @@ pub struct BuyAndHold {
 }
 
 impl Strategy for BuyAndHold {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "buy-and-hold"
     }
 

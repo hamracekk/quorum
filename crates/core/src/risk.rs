@@ -30,7 +30,7 @@ pub struct RiskManager {
 }
 
 impl RiskManager {
-    pub fn new(limits: RiskLimits) -> Self {
+    pub const fn new(limits: RiskLimits) -> Self {
         Self {
             limits,
             day: None,
@@ -53,7 +53,7 @@ impl RiskManager {
         }
     }
 
-    pub fn halted(&self) -> bool {
+    pub const fn halted(&self) -> bool {
         self.halted
     }
 
@@ -78,14 +78,18 @@ mod tests {
         DateTime::from_timestamp(hours * 3_600, 0).expect("valid timestamp")
     }
 
+    fn assert_close(actual: f64, expected: f64) {
+        assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+    }
+
     #[test]
     fn clamps_to_limits() {
         let risk = RiskManager::new(RiskLimits {
             max_exposure: 0.5,
             ..RiskLimits::default()
         });
-        assert_eq!(risk.clamp(1.0), 0.5);
-        assert_eq!(risk.clamp(-1.0), 0.0);
+        assert_close(risk.clamp(1.0), 0.5);
+        assert_close(risk.clamp(-1.0), 0.0);
     }
 
     #[test]
@@ -94,10 +98,10 @@ mod tests {
         risk.update(at(0), 1_000.0);
         risk.update(at(5), 940.0);
         assert!(risk.halted());
-        assert_eq!(risk.clamp(1.0), 0.0);
+        assert_close(risk.clamp(1.0), 0.0);
 
         risk.update(at(24), 940.0);
         assert!(!risk.halted());
-        assert_eq!(risk.clamp(1.0), 1.0);
+        assert_close(risk.clamp(1.0), 1.0);
     }
 }
