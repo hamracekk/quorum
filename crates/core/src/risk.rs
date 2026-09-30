@@ -2,11 +2,13 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
 
+use crate::instrument::InstrumentId;
+
 #[derive(Debug, Clone, Copy)]
 pub struct RiskLimits {
-    /// Maximum absolute exposure to any single symbol, as a fraction of equity.
+    /// Maximum absolute exposure to any single instrument, as a fraction of equity.
     pub max_exposure: f64,
-    /// Maximum sum of absolute exposures across all symbols.
+    /// Maximum sum of absolute exposures across all instruments.
     pub max_gross_exposure: f64,
     pub allow_short: bool,
     /// Flatten and stop trading for the rest of the UTC day once equity falls
@@ -63,8 +65,8 @@ impl RiskManager {
     }
 
     /// Risk-adjusted targets: all zero when halted; otherwise each target clamped to
-    /// the per-symbol limit, then all scaled down together if gross exposure is too high.
-    pub fn apply(&self, desired: &BTreeMap<String, f64>) -> BTreeMap<String, f64> {
+    /// the per-instrument limit, then all scaled down together if gross exposure is too high.
+    pub fn apply(&self, desired: &BTreeMap<InstrumentId, f64>) -> BTreeMap<InstrumentId, f64> {
         if self.halted {
             return desired.keys().map(|s| (s.clone(), 0.0)).collect();
         }
@@ -73,7 +75,7 @@ impl RiskManager {
         } else {
             0.0
         };
-        let mut targets: BTreeMap<String, f64> = desired
+        let mut targets: BTreeMap<InstrumentId, f64> = desired
             .iter()
             .map(|(s, t)| (s.clone(), t.clamp(floor, self.limits.max_exposure)))
             .collect();
@@ -97,8 +99,12 @@ mod tests {
         DateTime::from_timestamp(hours * 3_600, 0).expect("valid timestamp")
     }
 
-    fn targets(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
-        pairs.iter().map(|&(s, t)| (s.to_owned(), t)).collect()
+    fn id(symbol: &str) -> InstrumentId {
+        InstrumentId::spot("test", symbol).expect("valid instrument")
+    }
+
+    fn targets(pairs: &[(&str, f64)]) -> BTreeMap<InstrumentId, f64> {
+        pairs.iter().map(|&(s, t)| (id(s), t)).collect()
     }
 
     fn assert_close(actual: f64, expected: f64) {
@@ -106,23 +112,23 @@ mod tests {
     }
 
     #[test]
-    fn clamps_each_symbol() {
+    fn clamps_each_instrument() {
         let risk = RiskManager::new(RiskLimits {
             max_exposure: 0.5,
             max_gross_exposure: 10.0,
             ..RiskLimits::default()
         });
         let out = risk.apply(&targets(&[("A", 1.0), ("B", -1.0)]));
-        assert_close(out["A"], 0.5);
-        assert_close(out["B"], 0.0);
+        assert_close(out[&id("A")], 0.5);
+        assert_close(out[&id("B")], 0.0);
     }
 
     #[test]
     fn scales_down_gross_exposure() {
         let risk = RiskManager::new(RiskLimits::default());
         let out = risk.apply(&targets(&[("A", 1.0), ("B", 1.0)]));
-        assert_close(out["A"], 0.5);
-        assert_close(out["B"], 0.5);
+        assert_close(out[&id("A")], 0.5);
+        assert_close(out[&id("B")], 0.5);
     }
 
     #[test]
@@ -132,10 +138,39 @@ mod tests {
         risk.update(at(0), 1_000.0);
         risk.update(at(5), 940.0);
         assert!(risk.halted());
-        assert_close(risk.apply(&want)["A"], 0.0);
+        assert_close(risk.apply(&want)[&id("A")], 0.0);
 
         risk.update(at(24), 940.0);
         assert!(!risk.halted());
-        assert_close(risk.apply(&want)["A"], 1.0);
+        assert_close(risk.apply(&want)[&id("A")], 1.0);
+    }
+
+    #[test]
+    fn shorts_are_clamped_symmetrically_when_allowed() {
+        let risk = RiskManager::new(RiskLimits {
+            max_exposure: 0.5,
+            max_gross_exposure: 10.0,
+            allow_short: true,
+            ..RiskLimits::default()
+        });
+        assert_close(risk.apply(&targets(&[("A", -2.0)]))[&id("A")], -0.5);
+    }
+
+    #[test]
+    fn loss_just_below_the_limit_does_not_halt() {
+        let mut risk = RiskManager::new(RiskLimits::default());
+        risk.update(at(0), 1_000.0);
+        risk.update(at(1), 951.0);
+        assert!(!risk.halted());
+    }
+
+    #[test]
+    fn halting_zeroes_every_target() {
+        let mut risk = RiskManager::new(RiskLimits::default());
+        risk.update(at(0), 1_000.0);
+        risk.update(at(1), 900.0);
+        let out = risk.apply(&targets(&[("A", 0.5), ("B", 0.5)]));
+        assert_close(out[&id("A")], 0.0);
+        assert_close(out[&id("B")], 0.0);
     }
 }
