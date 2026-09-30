@@ -17,6 +17,8 @@ tasks:
       - '/crates/*/src/**/*'
       - '/crates/*/tests/**/*'
       - '/crates/*/Cargo.toml'
+      - '/crates/*/build.rs'
+      - '/crates/*/migrations/**/*'
       - '/Cargo.toml'
       - '/Cargo.lock'
       - '/clippy.toml'

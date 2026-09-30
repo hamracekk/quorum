@@ -11,3 +11,6 @@ cognitive-complexity-threshold = 20
 
 # Unpublished crates, so breaking the "public" API surface is fine.
 avoid-breaking-exported-api = false
+
+# Proper names that are not code; ".." keeps clippy's default list.
+doc-valid-idents = ["SQLite", ".."]
