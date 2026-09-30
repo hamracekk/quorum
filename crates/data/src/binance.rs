@@ -100,6 +100,17 @@ impl MarketData for BinanceSpot {
         &self.venue
     }
 
+    async fn check(&self) -> std::result::Result<(), PortError> {
+        self.client
+            .get(format!("{}/api/v3/ping", self.base_url))
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map(drop)
+            .map_err(|e| PortError::adapter("binance ping", e))
+    }
+
     async fn bars(
         &self,
         instrument: &InstrumentId,
@@ -279,5 +290,30 @@ mod tests {
             .await
             .expect_err("http 400");
         assert!(matches!(err, PortError::Adapter { .. }), "{err}");
+    }
+
+    #[tokio::test]
+    async fn check_pings_the_exchange() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v3/ping"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let binance = BinanceSpot::with_base_url(server.uri()).expect("client");
+        binance.check().await.expect("reachable");
+    }
+
+    #[tokio::test]
+    async fn check_reports_an_unhealthy_exchange() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v3/ping"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let binance = BinanceSpot::with_base_url(server.uri()).expect("client");
+        assert!(binance.check().await.is_err());
     }
 }

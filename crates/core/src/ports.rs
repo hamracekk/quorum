@@ -12,6 +12,7 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
@@ -49,6 +50,12 @@ impl PortError {
 pub trait MarketData: Send + Sync + fmt::Debug {
     fn venue(&self) -> &VenueId;
 
+    /// Cheap reachability check (e.g. an exchange ping) for status displays.
+    /// Adapters without a remote dependency keep the default: always reachable.
+    async fn check(&self) -> Result<(), PortError> {
+        Ok(())
+    }
+
     /// Closed bars with `start <= ts < end`, sorted by time without duplicates.
     /// Bars still forming at call time are never returned.
     async fn bars(
@@ -79,7 +86,8 @@ pub trait EventLog: Send + Sync + fmt::Debug {
 }
 
 /// What produced a journaled run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RunKind {
     Backtest,
     Replay,
@@ -113,7 +121,7 @@ impl FromStr for RunKind {
 }
 
 /// One journaled run: a backtest, a replay, or a paper/live session.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RunInfo {
     pub id: String,
     pub kind: RunKind,

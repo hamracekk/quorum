@@ -1,8 +1,9 @@
+use serde::Serialize;
 use trader_core::{BacktestConfig, Report, Series, run};
 
 use crate::StrategyFactory;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SweepRow<P> {
     pub params: P,
     pub report: Report,
