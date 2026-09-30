@@ -13,14 +13,15 @@ depends on no internal crate.
 | `types.rs` | `Bar` (keyed by **open** time), `Series` (one instrument's bars), `Fill`, `Side`, `EquityPoint` |
 | `events.rs` | `Event` (bar, signal, target, fill, risk_halt; tagged JSON) and `Envelope` (with log `seq`) |
 | `engine.rs` | `Engine`: event-driven core — bars in (time order), decision events out; used by backtest, replay and live |
-| `ports.rs` | Port traits `MarketData` (async), `BarStore`, `EventLog`, `Journal` (async), `RunInfo`/`RunKind`, `PortError` |
+| `ports.rs` | Port traits `MarketData`, `MarketStream` (async), `BarStore`, `EventLog`, `Journal` (async), `RunInfo`/`RunKind`, `PortError` |
 | `fakes.rs` | In-memory `MemoryMarketData`, `MemoryBarStore`, `MemoryEventLog` for tests in any crate |
 | `indicators.rs` | Streaming `Ema`, `Rsi` (Wilder), `Macd`, `Bollinger` |
 | `patterns.rs` | 13 candlestick patterns with bias; `detect_at` uses only bars up to `i` |
 | `signals.rs` | `Signal` (patterns + 8 indicator events), `SignalDetector` (streaming, fires on crossings), `occurrences` |
 | `strategy.rs` | `Strategy` trait: returns target exposure per instrument on each closed bar |
 | `strategies/` | `SmaCross`, `BuyAndHold`, `SignalFollower` (trade chosen signals, hold N bars), `PerInstrument` (one instance per instrument, equal weight), `Sma` |
-| `broker.rs` | `SimBroker`: multi-instrument positions, fees, slippage, min notional |
+| `broker.rs` | `Broker` port (sync, non-blocking: `submit`/`cancel`, outcomes via `poll`), `PaperBroker` (fills market orders against the latest quote with fees + slippage), `Portfolio` (cash, positions, marks; order sizing with min notional; changed only by fills) |
+| `order.rs` | `Order`, `OrderId`, `OrderStatus`, `ExecutionReport`, `OrderBook`: the order state machine, rejecting illegal transitions and overfills |
 | `risk.rs` | `RiskLimits`, `RiskManager`: per-instrument and gross exposure caps, daily-loss kill switch |
 | `backtest.rs` | `run` / `run_from` (warm-up) / `run_with_events`: merge series and feed the `Engine`; `BacktestConfig`, `BacktestResult` |
 | `metrics.rs` | `Performance` (return, CAGR, drawdown, Sharpe), `Report` (strategy vs benchmark, `Display`) |
@@ -38,6 +39,12 @@ depends on no internal crate.
 - **Strategies are `Send`** so the daemon can run them on async tasks.
 - **Determinism**: `BTreeMap` everywhere order matters; no randomness, no wall clock.
 - **No I/O here.** Adapters live in other crates and implement the ports.
+- **Positions change only on reported fills.** The engine never books a trade on submission; every
+  broker report goes through `OrderBook::apply`, and a report the state machine refuses stops the
+  engine (`EngineError::Order`) instead of being ignored.
+- **Results are pinned.** `tests/golden.rs` fingerprints a fixed synthetic backtest bit for bit. A
+  refactor must leave it green; update the constants only for an intended behaviour change, and say
+  so in the commit.
 
 ## Extending
 

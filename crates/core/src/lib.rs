@@ -12,6 +12,7 @@ pub mod fakes;
 pub mod indicators;
 pub mod instrument;
 pub mod metrics;
+pub mod order;
 pub mod patterns;
 pub mod ports;
 pub mod risk;
@@ -21,10 +22,12 @@ pub mod strategy;
 pub mod types;
 
 pub use backtest::{BacktestConfig, BacktestResult, run, run_from, run_with_events};
+pub use broker::{Broker, PaperBroker, Portfolio};
 pub use engine::{Engine, EngineError, EngineSnapshot, PositionSnapshot};
 pub use events::{Envelope, Event};
 pub use instrument::{InstrumentError, InstrumentId, InstrumentKind, VenueId};
 pub use metrics::{Performance, Report};
+pub use order::{ExecutionReport, Order, OrderBook, OrderError, OrderId, OrderStatus};
 pub use ports::{
     AgentCall, BarStore, EventLog, Journal, MarketData, MarketStream, PortError, RunInfo, RunKind,
     StreamedBar,

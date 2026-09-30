@@ -2,8 +2,9 @@
 //!
 //! Adapters (Binance, Parquet, …) live in other crates and implement these traits; the
 //! engine, lab and CLI only ever see the traits. Ports are added in the milestone that
-//! first needs them: `Broker` (M3b), `LlmProvider` and `NewsSource`
-//! (M5), `TraderSource` (M7), `Notifier` (integrations).
+//! first needs them: `LlmProvider` and `NewsSource` (M5), `TraderSource` (M7),
+//! `Notifier` (integrations). The order-execution port, [`Broker`](crate::broker::Broker),
+//! is synchronous and lives with the engine in [`crate::broker`].
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -17,6 +18,7 @@ use serde::Serialize;
 
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
+use crate::order::Order;
 use crate::types::{Bar, Fill, Series};
 
 /// Error crossing a port boundary. Adapters keep their own detailed errors and wrap them.
@@ -178,6 +180,9 @@ pub trait Journal: Send + Sync + fmt::Debug {
 
     /// Fills of `run_id` in execution order.
     async fn fills(&self, run_id: &str) -> Result<Vec<Fill>, PortError>;
+
+    /// Orders of `run_id` in their latest state, by id.
+    async fn orders(&self, run_id: &str) -> Result<Vec<Order>, PortError>;
 
     /// Audit one agent tool call.
     async fn record_agent_call(&self, call: &AgentCall) -> Result<(), PortError>;

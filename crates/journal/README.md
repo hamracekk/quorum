@@ -21,6 +21,7 @@ The journal (ADR 0002): a SQLite record of **decisions and executions, grouped b
 | `targets` | `run_id`, `ts`, `instrument`, `target` |
 | `fills` | `run_id`, `ts`, `instrument`, `side` (`buy`\|`sell`), `qty`, `price`, `fee` |
 | `risk_halts` | `run_id`, `ts`, `equity` |
+| `orders` (0003) | `run_id`, `order_id`, `instrument`, `side`, `qty`, `status`, `filled_qty`, `avg_price`, `fees`, `reason`, `created_at`, `updated_at` — one row per order, upserted by every `order` event so it holds the latest state |
 
 Timestamps are RFC 3339 UTC with milliseconds (`2026-09-30T12:00:00.000Z`) so text order is time
 order; instruments use their text form (`binance:BTCUSDT`). Bars are not journaled — they live in

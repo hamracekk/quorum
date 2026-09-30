@@ -11,6 +11,10 @@
 //!
 //! So a decision made on a bar can never trade on that bar's prices. Trades happen only when
 //! a risk-adjusted target actually changes, so there is no churn from price drift.
+//!
+//! Execution goes through the [`Broker`] port: a target becomes a market [`Order`], the
+//! broker's [`ExecutionReport`]s move it through the order state machine, and only reported
+//! fills change the [`Portfolio`]. Backtests and paper sessions use the [`PaperBroker`].
 
 use std::collections::BTreeMap;
 
@@ -18,21 +22,30 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::backtest::{BacktestConfig, BacktestResult};
-use crate::broker::SimBroker;
+use crate::broker::{Broker, PaperBroker, Portfolio};
 use crate::events::Event;
 use crate::instrument::InstrumentId;
 use crate::metrics::Report;
+use crate::order::{ExecutionReport, Order, OrderBook, OrderError, OrderStatus};
 use crate::risk::RiskManager;
 use crate::strategy::Strategy;
 use crate::types::{Bar, EquityPoint, Fill};
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum EngineError {
     #[error("bar for {instrument} at {ts} arrived after {latest}; bars must be in time order")]
     OutOfOrder {
         instrument: InstrumentId,
         ts: DateTime<Utc>,
         latest: DateTime<Utc>,
+    },
+    /// The broker reported something the order state machine refuses: the local view of
+    /// orders no longer matches the venue, so trading must stop.
+    #[error("broker `{broker}`: {source}")]
+    Order {
+        broker: String,
+        #[source]
+        source: OrderError,
     },
 }
 
@@ -61,6 +74,8 @@ pub struct EngineSnapshot {
     pub positions: Vec<PositionSnapshot>,
     /// Targets queued for each instrument's next bar open.
     pub pending: Vec<(InstrumentId, f64)>,
+    /// Orders handed to the broker and not yet filled, canceled or rejected.
+    pub open_orders: Vec<Order>,
 }
 
 #[derive(Debug)]
@@ -68,7 +83,9 @@ pub struct Engine<'s> {
     strategy: &'s mut dyn Strategy,
     cfg: BacktestConfig,
     measure_from: Option<DateTime<Utc>>,
-    broker: SimBroker,
+    portfolio: Portfolio,
+    broker: Box<dyn Broker>,
+    orders: OrderBook,
     risk: RiskManager,
     benchmark: Benchmark,
     desired: BTreeMap<InstrumentId, f64>,
@@ -85,17 +102,32 @@ impl<'s> Engine<'s> {
     /// `universe` is the set of instruments the benchmark splits capital across (equal
     /// weight, in this order). Bars before `measure_from` only warm up the strategy: nothing
     /// is executed or recorded for them.
+    /// Orders are filled by a [`PaperBroker`] with the configured fee and slippage.
     pub fn new(
         strategy: &'s mut dyn Strategy,
         cfg: BacktestConfig,
         universe: &[InstrumentId],
         measure_from: Option<DateTime<Utc>>,
     ) -> Self {
+        let broker = PaperBroker::new(cfg.fee_rate, cfg.slippage_bps);
+        Self::with_broker(strategy, cfg, universe, measure_from, Box::new(broker))
+    }
+
+    /// Like [`new`](Self::new), but orders go to `broker`.
+    pub fn with_broker(
+        strategy: &'s mut dyn Strategy,
+        cfg: BacktestConfig,
+        universe: &[InstrumentId],
+        measure_from: Option<DateTime<Utc>>,
+        broker: Box<dyn Broker>,
+    ) -> Self {
         Self {
             strategy,
             cfg,
             measure_from,
-            broker: SimBroker::new(cfg.initial_cash, cfg.fee_rate, cfg.slippage_bps),
+            portfolio: Portfolio::new(cfg.initial_cash),
+            broker,
+            orders: OrderBook::default(),
             risk: RiskManager::new(cfg.risk),
             benchmark: Benchmark::new(universe, cfg.initial_cash),
             desired: BTreeMap::new(),
@@ -131,16 +163,14 @@ impl<'s> Engine<'s> {
             _ => {}
         }
         self.open_ts = Some(bar.ts);
+        self.drain(&mut out)?;
 
         if self.measuring(bar.ts) {
             if let Some(target) = self.pending.remove(instrument) {
-                if let Some(fill) = self.broker.rebalance(instrument, bar.ts, bar.open, target) {
-                    out.push(Event::Fill(fill.clone()));
-                    self.fills.push(fill);
-                }
                 self.current.insert(instrument.clone(), target);
+                self.execute(instrument, bar.ts, bar.open, target, &mut out)?;
             }
-            self.broker.mark(instrument, bar.close);
+            self.portfolio.mark(instrument, bar.close);
             self.benchmark.observe(instrument, bar);
         }
 
@@ -167,11 +197,11 @@ impl<'s> Engine<'s> {
     /// Current state: cash, equity, positions valued at their latest marks, pending targets.
     pub fn snapshot(&self) -> EngineSnapshot {
         let positions = self
-            .broker
+            .portfolio
             .positions()
             .filter(|(_, qty)| qty.abs() > f64::EPSILON)
             .map(|(instrument, qty)| {
-                let mark = self.broker.mark_of(instrument).unwrap_or(0.0);
+                let mark = self.portfolio.mark_of(instrument).unwrap_or(0.0);
                 PositionSnapshot {
                     instrument: instrument.clone(),
                     qty,
@@ -183,8 +213,8 @@ impl<'s> Engine<'s> {
             .collect();
         EngineSnapshot {
             ts: self.open_ts,
-            cash: self.broker.cash(),
-            equity: self.broker.equity(),
+            cash: self.portfolio.cash(),
+            equity: self.portfolio.equity(),
             halted: self.risk.halted(),
             killed: self.killed,
             positions,
@@ -193,34 +223,41 @@ impl<'s> Engine<'s> {
                 .iter()
                 .map(|(instrument, target)| (instrument.clone(), *target))
                 .collect(),
+            open_orders: self.orders.open().cloned().collect(),
         }
     }
 
-    /// Kill switch: sell/cover every position **now** at its latest mark (with slippage and
-    /// fees), drop all targets, and ignore the strategy from here on. Returns the fills.
-    pub fn flatten(&mut self, ts: DateTime<Utc>) -> Vec<Event> {
+    /// Kill switch: cancel working orders, sell/cover every position **now** at its latest
+    /// mark (with slippage and fees), drop all targets, and ignore the strategy from here on.
+    /// Returns the resulting order and fill events.
+    pub fn flatten(&mut self, ts: DateTime<Utc>) -> Result<Vec<Event>, EngineError> {
         self.killed = true;
         self.desired.clear();
         self.pending.clear();
+        let mut out = Vec::new();
+        let working: Vec<_> = self.orders.open().map(|order| order.id).collect();
+        for id in working {
+            if let Err(err) = self.broker.cancel(id, ts) {
+                tracing::warn!(order = %id, error = %err, "kill switch: cancel failed");
+            }
+        }
+        self.drain(&mut out)?;
+
         let open: Vec<(InstrumentId, f64)> = self
-            .broker
+            .portfolio
             .positions()
             .filter(|(_, qty)| qty.abs() > f64::EPSILON)
             .filter_map(|(instrument, _)| {
-                self.broker
+                self.portfolio
                     .mark_of(instrument)
                     .map(|mark| (instrument.clone(), mark))
             })
             .collect();
-        let mut out = Vec::new();
         for (instrument, mark) in open {
-            if let Some(fill) = self.broker.rebalance(&instrument, ts, mark, 0.0) {
-                out.push(Event::Fill(fill.clone()));
-                self.fills.push(fill);
-            }
-            self.current.insert(instrument, 0.0);
+            self.current.insert(instrument.clone(), 0.0);
+            self.execute(&instrument, ts, mark, 0.0, &mut out)?;
         }
-        out
+        Ok(out)
     }
 
     /// Close the last timestamp and produce the result, plus the final decision events.
@@ -244,13 +281,78 @@ impl<'s> Engine<'s> {
         (result, out)
     }
 
+    /// Trade `instrument` toward `target` at `price`: size a market order against the
+    /// portfolio, hand it to the broker and apply what the broker reports.
+    fn execute(
+        &mut self,
+        instrument: &InstrumentId,
+        ts: DateTime<Utc>,
+        price: f64,
+        target: f64,
+        out: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        self.broker.quote(instrument, ts, price);
+        let Some((side, qty)) = self.portfolio.order_for(instrument, price, target) else {
+            return Ok(());
+        };
+        let order = self.orders.create(ts, instrument, side, qty);
+        let submitted = self.broker.submit(&order);
+        self.drain(out)?;
+        if let Err(err) = submitted {
+            let rejected = ExecutionReport::Rejected {
+                id: order.id,
+                ts,
+                reason: format!("not submitted: {err}"),
+            };
+            self.apply_report(&rejected, out)?;
+        }
+        Ok(())
+    }
+
+    /// Apply every report the broker has produced since the last call.
+    fn drain(&mut self, out: &mut Vec<Event>) -> Result<(), EngineError> {
+        for report in self.broker.poll() {
+            self.apply_report(&report, out)?;
+        }
+        Ok(())
+    }
+
+    /// Move the order through its state machine; book fills; emit `fill` and `order` events.
+    /// A rejected or canceled order forgets the instrument's held target so the next
+    /// timestamp queues it again.
+    fn apply_report(
+        &mut self,
+        report: &ExecutionReport,
+        out: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        let order = self
+            .orders
+            .apply(report)
+            .map_err(|source| EngineError::Order {
+                broker: self.broker.name().to_owned(),
+                source,
+            })?
+            .clone();
+        if let ExecutionReport::Filled { fill, .. } = report {
+            self.portfolio.apply(fill);
+            out.push(Event::Fill(fill.clone()));
+            self.fills.push(fill.clone());
+        }
+        if matches!(order.status, OrderStatus::Rejected | OrderStatus::Canceled) {
+            tracing::warn!(order = %order.id, instrument = %order.instrument, status = %order.status, reason = order.reason.as_deref().unwrap_or(""), "order not executed");
+            self.current.remove(&order.instrument);
+        }
+        out.push(Event::Order(order));
+        Ok(())
+    }
+
     fn measuring(&self, ts: DateTime<Utc>) -> bool {
         self.measure_from.is_none_or(|start| ts >= start)
     }
 
     fn close_timestamp(&mut self, ts: DateTime<Utc>, out: &mut Vec<Event>) {
         if self.measuring(ts) {
-            let equity = self.broker.equity();
+            let equity = self.portfolio.equity();
             let was_halted = self.risk.halted();
             self.risk.update(ts, equity);
             if self.risk.halted() && !was_halted {
@@ -403,10 +505,15 @@ mod tests {
         let (_, events) = run_with_events(&mut BuyAndHold::default(), &series, &cfg(), None);
 
         let kinds: Vec<&str> = events.iter().map(Event::kind).collect();
-        assert_eq!(kinds, vec!["signal", "target", "fill"]);
+        assert_eq!(kinds, vec!["signal", "target", "order", "fill", "order"]);
         assert!(events.windows(2).all(|w| w[0].ts() <= w[1].ts()));
         assert_eq!(events[0].ts(), at(0));
-        assert_eq!(events[2].ts(), at(1));
+        assert_eq!(events[3].ts(), at(1));
+        let Event::Order(order) = &events[4] else {
+            panic!("expected the filled order, got {events:?}");
+        };
+        assert_eq!(order.status, OrderStatus::Filled);
+        assert_eq!(order.created_at, at(1));
     }
 
     #[test]
@@ -510,11 +617,16 @@ mod tests {
         engine.on_bar(&id("A"), &bar(0, 100.0, 100.0)).expect("bar");
         engine.on_bar(&id("A"), &bar(1, 100.0, 120.0)).expect("bar");
 
-        let fills = engine.flatten(at(1));
+        let events = engine.flatten(at(1)).expect("flatten");
+        let fills: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Fill(fill) => Some(fill),
+                _ => None,
+            })
+            .collect();
         assert_eq!(fills.len(), 1);
-        let Event::Fill(fill) = &fills[0] else {
-            panic!("expected a fill, got {fills:?}");
-        };
+        let fill = fills[0];
         assert_eq!(fill.side, crate::types::Side::Sell);
         assert!((fill.price - 120.0).abs() < 1e-9, "sold at the latest mark");
 
@@ -529,10 +641,170 @@ mod tests {
         assert!((snap.equity - 1_200.0).abs() < 1e-9);
     }
 
+    /// Venue whose behaviour each test scripts: accept and hold orders, refuse to take them,
+    /// or report nonsense.
+    #[derive(Debug, Default)]
+    struct Scripted {
+        mode: Mode,
+        reports: Vec<ExecutionReport>,
+        submitted: Vec<Order>,
+    }
+
+    #[derive(Debug, Default, Clone, Copy)]
+    enum Mode {
+        /// Accept and never fill.
+        #[default]
+        Hold,
+        /// `submit` fails: the order never reaches the venue.
+        Unreachable,
+        /// Report a fill for an order it never accepted.
+        Bogus,
+    }
+
+    impl Broker for Scripted {
+        fn name(&self) -> &'static str {
+            "scripted"
+        }
+
+        fn submit(&mut self, order: &Order) -> Result<(), crate::ports::PortError> {
+            self.submitted.push(order.clone());
+            match self.mode {
+                Mode::Hold => self.reports.push(ExecutionReport::Accepted {
+                    id: order.id,
+                    ts: order.created_at,
+                }),
+                Mode::Unreachable => {
+                    return Err(crate::ports::PortError::Invalid("venue down".into()));
+                }
+                Mode::Bogus => self.reports.push(ExecutionReport::Filled {
+                    id: order.id,
+                    fill: Fill {
+                        ts: order.created_at,
+                        instrument: order.instrument.clone(),
+                        side: order.side,
+                        qty: order.qty,
+                        price: 1.0,
+                        fee: 0.0,
+                    },
+                }),
+            }
+            Ok(())
+        }
+
+        fn cancel(
+            &mut self,
+            id: crate::order::OrderId,
+            ts: DateTime<Utc>,
+        ) -> Result<(), crate::ports::PortError> {
+            self.reports.push(ExecutionReport::Canceled {
+                id,
+                ts,
+                reason: "requested".into(),
+            });
+            Ok(())
+        }
+
+        fn poll(&mut self) -> Vec<ExecutionReport> {
+            std::mem::take(&mut self.reports)
+        }
+    }
+
+    fn scripted(mode: Mode) -> Box<dyn Broker> {
+        Box::new(Scripted {
+            mode,
+            ..Scripted::default()
+        })
+    }
+
+    #[test]
+    fn positions_change_only_on_reported_fills() {
+        let mut strategy = BuyAndHold::default();
+        let mut engine =
+            Engine::with_broker(&mut strategy, cfg(), &[id("A")], None, scripted(Mode::Hold));
+        engine.on_bar(&id("A"), &bar(0, 100.0, 100.0)).expect("bar");
+        let events = engine.on_bar(&id("A"), &bar(1, 100.0, 110.0)).expect("bar");
+
+        assert!(events.iter().all(|e| e.kind() != "fill"), "{events:?}");
+        let snap = engine.snapshot();
+        assert!(snap.positions.is_empty());
+        assert!((snap.equity - 1_000.0).abs() < 1e-9);
+        assert_eq!(snap.open_orders.len(), 1);
+        assert_eq!(snap.open_orders[0].status, OrderStatus::Accepted);
+    }
+
+    #[test]
+    fn orders_that_never_reach_the_venue_are_rejected_and_retried() {
+        let mut strategy = BuyAndHold::default();
+        let mut engine = Engine::with_broker(
+            &mut strategy,
+            cfg(),
+            &[id("A")],
+            None,
+            scripted(Mode::Unreachable),
+        );
+        let mut events = Vec::new();
+        for h in 0..4 {
+            events.extend(engine.on_bar(&id("A"), &bar(h, 100.0, 100.0)).expect("bar"));
+        }
+        let rejected: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Order(order) => Some(order),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(rejected.len(), 3, "one attempt per bar after the first");
+        assert!(rejected.iter().all(|o| o.status == OrderStatus::Rejected));
+        assert!(
+            rejected[0]
+                .reason
+                .as_deref()
+                .is_some_and(|r| r.contains("venue down"))
+        );
+        assert!(engine.snapshot().open_orders.is_empty());
+    }
+
+    #[test]
+    fn reports_that_break_the_state_machine_stop_the_engine() {
+        let mut strategy = BuyAndHold::default();
+        let mut engine = Engine::with_broker(
+            &mut strategy,
+            cfg(),
+            &[id("A")],
+            None,
+            scripted(Mode::Bogus),
+        );
+        engine.on_bar(&id("A"), &bar(0, 100.0, 100.0)).expect("bar");
+        let err = engine
+            .on_bar(&id("A"), &bar(1, 100.0, 100.0))
+            .expect_err("fill before acceptance");
+        assert!(
+            matches!(&err, EngineError::Order { broker, .. } if broker == "scripted"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn the_kill_switch_cancels_working_orders() {
+        let mut strategy = BuyAndHold::default();
+        let mut engine =
+            Engine::with_broker(&mut strategy, cfg(), &[id("A")], None, scripted(Mode::Hold));
+        engine.on_bar(&id("A"), &bar(0, 100.0, 100.0)).expect("bar");
+        engine.on_bar(&id("A"), &bar(1, 100.0, 100.0)).expect("bar");
+        assert_eq!(engine.snapshot().open_orders.len(), 1);
+
+        let events = engine.flatten(at(1)).expect("flatten");
+        let Some(Event::Order(order)) = events.first() else {
+            panic!("expected the canceled order, got {events:?}");
+        };
+        assert_eq!(order.status, OrderStatus::Canceled);
+        assert!(engine.snapshot().open_orders.is_empty());
+    }
+
     #[test]
     fn flattening_an_empty_book_is_a_no_op() {
         let mut strategy = BuyAndHold::default();
         let mut engine = Engine::new(&mut strategy, cfg(), &[id("A")], None);
-        assert!(engine.flatten(at(0)).is_empty());
+        assert!(engine.flatten(at(0)).expect("flatten").is_empty());
     }
 }
