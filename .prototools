@@ -2,6 +2,9 @@
 # `proto use` installs everything below at the pinned versions.
 rust = "1.96.1"
 moon = "2.4.2"
+bun = "1.3.14"
+# Vite 8 needs Node >= 20.19 / 22.12.
+node = "22.12.0"
 
 [settings]
 auto-install = true
