@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 
 use crate::engine::Engine;
 use crate::events::Event;
@@ -28,7 +29,7 @@ impl Default for BacktestConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BacktestResult {
     pub equity_curve: Vec<EquityPoint>,
     /// Equal-weight buy & hold of the same instruments, without fees or risk limits.

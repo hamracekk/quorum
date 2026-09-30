@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use trader_core::{BacktestConfig, BacktestResult, EquityPoint, Report, Series, run, run_from};
 
 use crate::{LabError, StrategyFactory, slice_all};
@@ -12,7 +13,7 @@ pub struct WalkForwardConfig {
 }
 
 /// One train/test split.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Window<P> {
     pub train_start: DateTime<Utc>,
     pub test_start: DateTime<Utc>,
@@ -24,7 +25,7 @@ pub struct Window<P> {
     pub test: Report,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct WalkForwardReport<P> {
     pub windows: Vec<Window<P>>,
     /// All test windows chained into one out-of-sample equity curve.

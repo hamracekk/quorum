@@ -9,6 +9,7 @@ publish = false
 
 [workspace.dependencies]
 anyhow = "1"
+axum = "0.8"
 async-trait = "0.1"
 arrow-array = "60"
 arrow-schema = "60"
@@ -23,6 +24,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
 thiserror = "2"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["fs", "trace"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -33,6 +36,8 @@ trader-core = { path = "crates/core" }
 trader-data = { path = "crates/data" }
 trader-journal = { path = "crates/journal" }
 trader-lab = { path = "crates/lab" }
+trader-server = { path = "crates/server" }
+trader-service = { path = "crates/service" }
 
 # Centralized lint policy — every crate opts in with `[lints] workspace = true`.
 # Levels are `warn` locally (so dev builds stay usable); `cargo lint` and CI pass
