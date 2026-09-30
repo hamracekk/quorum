@@ -15,8 +15,11 @@ depends on no internal crate.
 | `engine.rs` | `Engine`: event-driven core — bars in (time order), decision events out; used by backtest, replay and live |
 | `ports.rs` | Port traits `MarketData` (async), `BarStore`, `EventLog`, `Journal` (async), `RunInfo`/`RunKind`, `PortError` |
 | `fakes.rs` | In-memory `MemoryMarketData`, `MemoryBarStore`, `MemoryEventLog` for tests in any crate |
+| `indicators.rs` | Streaming `Ema`, `Rsi` (Wilder), `Macd`, `Bollinger` |
+| `patterns.rs` | 13 candlestick patterns with bias; `detect_at` uses only bars up to `i` |
+| `signals.rs` | `Signal` (patterns + 8 indicator events), `SignalDetector` (streaming, fires on crossings), `occurrences` |
 | `strategy.rs` | `Strategy` trait: returns target exposure per instrument on each closed bar |
-| `strategies/` | `SmaCross`, `BuyAndHold`, `PerInstrument` (runs a single-asset strategy per instrument, equal weight), `Sma` |
+| `strategies/` | `SmaCross`, `BuyAndHold`, `SignalFollower` (trade chosen signals, hold N bars), `PerInstrument` (one instance per instrument, equal weight), `Sma` |
 | `broker.rs` | `SimBroker`: multi-instrument positions, fees, slippage, min notional |
 | `risk.rs` | `RiskLimits`, `RiskManager`: per-instrument and gross exposure caps, daily-loss kill switch |
 | `backtest.rs` | `run` / `run_from` (warm-up) / `run_with_events`: merge series and feed the `Engine`; `BacktestConfig`, `BacktestResult` |

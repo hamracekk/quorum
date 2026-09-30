@@ -1,14 +1,18 @@
 //! In-memory implementations of the ports for deterministic tests in any crate.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
+use std::pin::Pin;
 use std::sync::{Mutex, PoisonError};
+use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use futures_core::Stream;
+use futures_core::stream::BoxStream;
 
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
-use crate::ports::{BarStore, EventLog, MarketData, PortError};
+use crate::ports::{BarStore, EventLog, MarketData, MarketStream, PortError, StreamedBar};
 use crate::types::{Bar, Series};
 
 /// A recorded `MarketData::bars` call: instrument, start, end.
@@ -107,6 +111,52 @@ impl BarStore for MemoryBarStore {
                 series.clone(),
             );
         Ok(())
+    }
+}
+
+/// Yields a fixed list of closed bars, then ends — a stand-in for a live websocket feed.
+#[derive(Debug, Clone)]
+pub struct MemoryMarketStream {
+    venue: VenueId,
+    bars: Vec<(InstrumentId, Bar)>,
+}
+
+impl MemoryMarketStream {
+    pub const fn new(venue: VenueId, bars: Vec<(InstrumentId, Bar)>) -> Self {
+        Self { venue, bars }
+    }
+}
+
+/// `Stream` over a queue, without pulling in a stream-utilities crate.
+struct Queue(VecDeque<StreamedBar>);
+
+impl Stream for Queue {
+    type Item = StreamedBar;
+
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(self.0.pop_front())
+    }
+}
+
+#[async_trait]
+impl MarketStream for MemoryMarketStream {
+    fn venue(&self) -> &VenueId {
+        &self.venue
+    }
+
+    async fn subscribe(
+        &self,
+        instruments: &[InstrumentId],
+        _interval: &str,
+    ) -> Result<BoxStream<'static, StreamedBar>, PortError> {
+        let queue = self
+            .bars
+            .iter()
+            .filter(|(instrument, _)| instruments.contains(instrument))
+            .cloned()
+            .map(Ok)
+            .collect();
+        Ok(Box::pin(Queue(queue)))
     }
 }
 

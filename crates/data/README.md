@@ -8,6 +8,7 @@ Implements the `core` ports; nothing outside this crate knows about Binance or P
 | File | What it holds |
 |---|---|
 | `binance.rs` | `BinanceSpot`: async `MarketData` adapter for Binance spot klines (public REST, no key). Pages 1000 bars/request, drops still-forming bars, `end` exclusive, 200 ms between pages |
+| `binance_ws.rs` | `BinanceStream`: `MarketStream` over the public websocket; closed klines only; reconnect with exponential backoff (tested against a local websocket server) |
 | `store.rs` | `ParquetStore`: `BarStore` on Parquet; `read_parquet` / `write_parquet` (atomic temp-file + rename); `migrate_flat_layout` for M1 files |
 | `lib.rs` | `sync(source, store, instrument, interval, since_if_empty, until)`: fetches only bars newer than the last stored one |
 | `error.rs` | `DataError` (detailed); wrapped into `PortError` at the port boundary |

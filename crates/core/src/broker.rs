@@ -40,6 +40,18 @@ impl SimBroker {
         self.positions.get(instrument).copied().unwrap_or(0.0)
     }
 
+    /// Latest valuation price of `instrument`, if it has been marked.
+    pub fn mark_of(&self, instrument: &InstrumentId) -> Option<f64> {
+        self.marks.get(instrument).copied()
+    }
+
+    /// Every instrument with a position (including zero after a round trip), in order.
+    pub fn positions(&self) -> impl Iterator<Item = (&InstrumentId, f64)> {
+        self.positions
+            .iter()
+            .map(|(instrument, &qty)| (instrument, qty))
+    }
+
     /// Update the valuation price of `instrument`.
     pub fn mark(&mut self, instrument: &InstrumentId, price: f64) {
         self.marks.insert(instrument.clone(), price);

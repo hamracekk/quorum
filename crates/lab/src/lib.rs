@@ -6,6 +6,7 @@
 //! judged only on the following window, which they have never seen.
 
 mod error;
+pub mod signals;
 mod sweep;
 mod walk_forward;
 

@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 
 use crate::backtest::{BacktestConfig, BacktestResult};
 use crate::broker::SimBroker;
@@ -35,6 +36,33 @@ pub enum EngineError {
     },
 }
 
+/// One instrument's paper/sim position as seen by the engine.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PositionSnapshot {
+    pub instrument: InstrumentId,
+    pub qty: f64,
+    /// Latest close used to value the position.
+    pub mark: f64,
+    pub value: f64,
+    /// Risk-adjusted target currently held (fraction of equity).
+    pub target: f64,
+}
+
+/// Point-in-time state of an engine: what a dashboard or state file needs.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EngineSnapshot {
+    /// Timestamp of the latest bar fed in.
+    pub ts: Option<DateTime<Utc>>,
+    pub cash: f64,
+    pub equity: f64,
+    pub halted: bool,
+    /// True after the kill switch: positions flattened, strategy ignored.
+    pub killed: bool,
+    pub positions: Vec<PositionSnapshot>,
+    /// Targets queued for each instrument's next bar open.
+    pub pending: Vec<(InstrumentId, f64)>,
+}
+
 #[derive(Debug)]
 pub struct Engine<'s> {
     strategy: &'s mut dyn Strategy,
@@ -47,6 +75,7 @@ pub struct Engine<'s> {
     current: BTreeMap<InstrumentId, f64>,
     pending: BTreeMap<InstrumentId, f64>,
     open_ts: Option<DateTime<Utc>>,
+    killed: bool,
     fills: Vec<Fill>,
     equity_curve: Vec<EquityPoint>,
     benchmark_curve: Vec<EquityPoint>,
@@ -73,6 +102,7 @@ impl<'s> Engine<'s> {
             current: BTreeMap::new(),
             pending: BTreeMap::new(),
             open_ts: None,
+            killed: false,
             fills: Vec::new(),
             equity_curve: Vec::new(),
             benchmark_curve: Vec::new(),
@@ -114,6 +144,9 @@ impl<'s> Engine<'s> {
             self.benchmark.observe(instrument, bar);
         }
 
+        if self.killed {
+            return Ok(out);
+        }
         if let Some(target) = self.strategy.on_bar(instrument, bar) {
             let changed = self
                 .desired
@@ -129,6 +162,65 @@ impl<'s> Engine<'s> {
             }
         }
         Ok(out)
+    }
+
+    /// Current state: cash, equity, positions valued at their latest marks, pending targets.
+    pub fn snapshot(&self) -> EngineSnapshot {
+        let positions = self
+            .broker
+            .positions()
+            .filter(|(_, qty)| qty.abs() > f64::EPSILON)
+            .map(|(instrument, qty)| {
+                let mark = self.broker.mark_of(instrument).unwrap_or(0.0);
+                PositionSnapshot {
+                    instrument: instrument.clone(),
+                    qty,
+                    mark,
+                    value: qty * mark,
+                    target: self.current.get(instrument).copied().unwrap_or(0.0),
+                }
+            })
+            .collect();
+        EngineSnapshot {
+            ts: self.open_ts,
+            cash: self.broker.cash(),
+            equity: self.broker.equity(),
+            halted: self.risk.halted(),
+            killed: self.killed,
+            positions,
+            pending: self
+                .pending
+                .iter()
+                .map(|(instrument, target)| (instrument.clone(), *target))
+                .collect(),
+        }
+    }
+
+    /// Kill switch: sell/cover every position **now** at its latest mark (with slippage and
+    /// fees), drop all targets, and ignore the strategy from here on. Returns the fills.
+    pub fn flatten(&mut self, ts: DateTime<Utc>) -> Vec<Event> {
+        self.killed = true;
+        self.desired.clear();
+        self.pending.clear();
+        let open: Vec<(InstrumentId, f64)> = self
+            .broker
+            .positions()
+            .filter(|(_, qty)| qty.abs() > f64::EPSILON)
+            .filter_map(|(instrument, _)| {
+                self.broker
+                    .mark_of(instrument)
+                    .map(|mark| (instrument.clone(), mark))
+            })
+            .collect();
+        let mut out = Vec::new();
+        for (instrument, mark) in open {
+            if let Some(fill) = self.broker.rebalance(&instrument, ts, mark, 0.0) {
+                out.push(Event::Fill(fill.clone()));
+                self.fills.push(fill);
+            }
+            self.current.insert(instrument, 0.0);
+        }
+        out
     }
 
     /// Close the last timestamp and produce the result, plus the final decision events.
@@ -171,6 +263,9 @@ impl<'s> Engine<'s> {
             });
         }
 
+        if self.killed {
+            return;
+        }
         for (instrument, target) in self.risk.apply(&self.desired) {
             let held = self.current.get(&instrument).copied().unwrap_or(0.0);
             if (target - held).abs() > f64::EPSILON {
@@ -388,5 +483,56 @@ mod tests {
         engine.on_bar(&id("B"), &bar(0, 10.0, 50.0)).expect("bar");
         let (result, _) = engine.finish();
         assert!(result.report.benchmark.total_return.abs() < 1e-9);
+    }
+
+    #[test]
+    fn snapshot_reports_positions_equity_and_targets() {
+        let mut strategy = BuyAndHold::default();
+        let mut engine = Engine::new(&mut strategy, cfg(), &[id("A")], None);
+        engine.on_bar(&id("A"), &bar(0, 100.0, 100.0)).expect("bar");
+        engine.on_bar(&id("A"), &bar(1, 100.0, 110.0)).expect("bar");
+        let snap = engine.snapshot();
+
+        assert_eq!(snap.ts, Some(at(1)));
+        assert_eq!(snap.positions.len(), 1);
+        let position = &snap.positions[0];
+        assert!((position.qty - 10.0).abs() < 1e-9);
+        assert!((position.mark - 110.0).abs() < 1e-9);
+        assert!((position.target - 1.0).abs() < 1e-9);
+        assert!((snap.equity - 1_100.0).abs() < 1e-9);
+        assert!(!snap.killed);
+    }
+
+    #[test]
+    fn flatten_sells_everything_now_and_ignores_the_strategy_afterwards() {
+        let mut strategy = BuyAndHold::default();
+        let mut engine = Engine::new(&mut strategy, cfg(), &[id("A")], None);
+        engine.on_bar(&id("A"), &bar(0, 100.0, 100.0)).expect("bar");
+        engine.on_bar(&id("A"), &bar(1, 100.0, 120.0)).expect("bar");
+
+        let fills = engine.flatten(at(1));
+        assert_eq!(fills.len(), 1);
+        let Event::Fill(fill) = &fills[0] else {
+            panic!("expected a fill, got {fills:?}");
+        };
+        assert_eq!(fill.side, crate::types::Side::Sell);
+        assert!((fill.price - 120.0).abs() < 1e-9, "sold at the latest mark");
+
+        let later = engine.on_bar(&id("A"), &bar(2, 120.0, 130.0)).expect("bar");
+        let later_tail = engine.on_bar(&id("A"), &bar(3, 130.0, 140.0)).expect("bar");
+        assert!(
+            later.is_empty() && later_tail.is_empty(),
+            "{later:?} {later_tail:?}"
+        );
+        let snap = engine.snapshot();
+        assert!(snap.killed && snap.positions.is_empty() && snap.pending.is_empty());
+        assert!((snap.equity - 1_200.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn flattening_an_empty_book_is_a_no_op() {
+        let mut strategy = BuyAndHold::default();
+        let mut engine = Engine::new(&mut strategy, cfg(), &[id("A")], None);
+        assert!(engine.flatten(at(0)).is_empty());
     }
 }

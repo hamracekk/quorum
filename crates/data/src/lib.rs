@@ -7,6 +7,7 @@
 //!   than the last one stored.
 
 pub mod binance;
+pub mod binance_ws;
 mod error;
 mod store;
 
