@@ -66,6 +66,43 @@ impl SqliteJournal {
         Self::migrated(pool).await
     }
 
+    /// Write a consistent, compacted copy of the database to `target` (`VACUUM INTO`), safe
+    /// while other connections read and write. `target` must not exist yet.
+    pub async fn backup_to(&self, target: &Path) -> Result<(), JournalError> {
+        let text = target.to_str().ok_or_else(|| {
+            JournalError::Corrupt(format!("backup path {} is not UTF-8", target.display()))
+        })?;
+        sqlx::query("VACUUM INTO ?")
+            .bind(text)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Open the database file at `path` read-only and run SQLite's integrity check.
+    pub async fn check_file(path: &Path) -> Result<(), JournalError> {
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .read_only(true)
+            .create_if_missing(false);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await?;
+        let result: String = sqlx::query_scalar("PRAGMA integrity_check")
+            .fetch_one(&pool)
+            .await?;
+        pool.close().await;
+        if result == "ok" {
+            Ok(())
+        } else {
+            Err(JournalError::Corrupt(format!(
+                "{} failed the integrity check: {result}",
+                path.display()
+            )))
+        }
+    }
+
     async fn migrated(pool: SqlitePool) -> Result<Self, JournalError> {
         MIGRATOR.run(&pool).await?;
         Ok(Self { pool })
@@ -492,6 +529,44 @@ mod tests {
         );
         assert_eq!(journal.orders("b").await.expect("orders"), vec![new]);
         assert!(journal.orders("missing").await.expect("orders").is_empty());
+    }
+
+    #[tokio::test]
+    async fn backups_are_consistent_copies_that_pass_the_integrity_check() {
+        let dir =
+            std::env::temp_dir().join(format!("trader-journal-backup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let journal = SqliteJournal::open(&dir.join("trader.db"))
+            .await
+            .expect("journal");
+        journal.start_run(&run("r1", 0)).await.expect("start");
+        journal.record("r1", &decisions()).await.expect("record");
+
+        let copy = dir.join("copy.db");
+        journal.backup_to(&copy).await.expect("backup");
+        SqliteJournal::check_file(&copy).await.expect("intact");
+        let restored = SqliteJournal::open(&copy).await.expect("open copy");
+        assert_eq!(
+            restored.fills("r1").await.expect("fills"),
+            journal.fills("r1").await.expect("fills")
+        );
+        assert!(
+            journal.backup_to(&copy).await.is_err(),
+            "an existing target is never overwritten"
+        );
+
+        std::fs::write(dir.join("garbage.db"), b"not a database").expect("write");
+        assert!(
+            SqliteJournal::check_file(&dir.join("garbage.db"))
+                .await
+                .is_err()
+        );
+        assert!(
+            SqliteJournal::check_file(&dir.join("missing.db"))
+                .await
+                .is_err()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
