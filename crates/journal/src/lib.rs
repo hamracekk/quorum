@@ -19,7 +19,8 @@ use sqlx::Row;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use trader_core::{
-    AgentCall, Event, Fill, InstrumentId, Journal, PortError, RunInfo, RunKind, Side,
+    AgentCall, Event, Fill, InstrumentId, Journal, Order, OrderId, OrderStatus, PortError, RunInfo,
+    RunKind, Side,
 };
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -122,6 +123,29 @@ impl SqliteJournal {
                 .bind(fill.qty)
                 .bind(fill.price)
                 .bind(fill.fee),
+                Event::Order(order) => sqlx::query(
+                    "INSERT INTO orders (run_id, order_id, instrument, side, qty, status, \
+                     filled_qty, avg_price, fees, reason, created_at, updated_at) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                     ON CONFLICT (run_id, order_id) DO UPDATE SET status = excluded.status, \
+                     filled_qty = excluded.filled_qty, avg_price = excluded.avg_price, \
+                     fees = excluded.fees, reason = excluded.reason, \
+                     updated_at = excluded.updated_at",
+                )
+                .bind(run_id)
+                .bind(i64::try_from(order.id.0).map_err(|_| {
+                    JournalError::Corrupt(format!("order id {} out of range", order.id))
+                })?)
+                .bind(order.instrument.to_string())
+                .bind(side_text(order.side))
+                .bind(order.qty)
+                .bind(order.status.as_str())
+                .bind(order.filled_qty)
+                .bind(order.avg_price)
+                .bind(order.fees)
+                .bind(order.reason.as_deref())
+                .bind(format_ts(order.created_at))
+                .bind(format_ts(order.updated_at)),
                 Event::RiskHalt { ts, equity } => {
                     sqlx::query("INSERT INTO risk_halts (run_id, ts, equity) VALUES (?, ?, ?)")
                         .bind(run_id)
@@ -190,6 +214,44 @@ impl SqliteJournal {
 }
 
 impl SqliteJournal {
+    async fn select_orders(&self, run_id: &str) -> Result<Vec<Order>, JournalError> {
+        let rows = sqlx::query(
+            "SELECT order_id, instrument, side, qty, status, filled_qty, avg_price, fees, \
+             reason, created_at, updated_at FROM orders WHERE run_id = ? ORDER BY order_id",
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                let id: i64 = row.try_get("order_id")?;
+                let instrument: String = row.try_get("instrument")?;
+                let side: String = row.try_get("side")?;
+                let status: String = row.try_get("status")?;
+                let created_at: String = row.try_get("created_at")?;
+                let updated_at: String = row.try_get("updated_at")?;
+                Ok(Order {
+                    id: OrderId(
+                        u64::try_from(id)
+                            .map_err(|_| JournalError::Corrupt(format!("order id {id}")))?,
+                    ),
+                    instrument: InstrumentId::from_str(&instrument)
+                        .map_err(|e| JournalError::Corrupt(e.to_string()))?,
+                    side: parse_side(&side)?,
+                    qty: row.try_get("qty")?,
+                    status: OrderStatus::from_str(&status)
+                        .map_err(|e| JournalError::Corrupt(e.to_string()))?,
+                    filled_qty: row.try_get("filled_qty")?,
+                    avg_price: row.try_get("avg_price")?,
+                    fees: row.try_get("fees")?,
+                    reason: row.try_get("reason")?,
+                    created_at: parse_ts(&created_at)?,
+                    updated_at: parse_ts(&updated_at)?,
+                })
+            })
+            .collect()
+    }
+
     async fn insert_agent_call(&self, call: &AgentCall) -> Result<(), JournalError> {
         sqlx::query(
             "INSERT INTO agent_calls (ts, agent, tool, arguments, ok, summary, duration_ms) \
@@ -253,6 +315,10 @@ impl Journal for SqliteJournal {
 
     async fn fills(&self, run_id: &str) -> Result<Vec<Fill>, PortError> {
         self.select_fills(run_id).await.map_err(port)
+    }
+
+    async fn orders(&self, run_id: &str) -> Result<Vec<Order>, PortError> {
+        self.select_orders(run_id).await.map_err(port)
     }
 
     async fn record_agent_call(&self, call: &AgentCall) -> Result<(), PortError> {
@@ -376,6 +442,56 @@ mod tests {
         assert_eq!(count(&journal, "SELECT COUNT(*) FROM signals").await, 1);
         assert_eq!(count(&journal, "SELECT COUNT(*) FROM targets").await, 1);
         assert_eq!(count(&journal, "SELECT COUNT(*) FROM risk_halts").await, 1);
+    }
+
+    #[tokio::test]
+    async fn order_events_upsert_the_latest_state_per_run() {
+        let journal = SqliteJournal::in_memory().await.expect("journal");
+        journal.start_run(&run("a", 0)).await.expect("start");
+        journal.start_run(&run("b", 1)).await.expect("start");
+
+        let new = Order::new(OrderId(1), at(1), btc(), Side::Buy, 0.5);
+        let accepted = Order {
+            status: OrderStatus::Accepted,
+            ..new.clone()
+        };
+        let filled = Order {
+            status: OrderStatus::Filled,
+            filled_qty: 0.5,
+            avg_price: 100.25,
+            fees: 0.05,
+            updated_at: at(2),
+            ..new.clone()
+        };
+        let rejected = Order {
+            status: OrderStatus::Rejected,
+            reason: Some("venue down".into()),
+            ..Order::new(OrderId(2), at(3), btc(), Side::Sell, 0.5)
+        };
+        let rows = journal
+            .record(
+                "a",
+                &[
+                    Event::Order(accepted),
+                    Event::Order(filled.clone()),
+                    Event::Order(rejected.clone()),
+                ],
+            )
+            .await
+            .expect("record");
+        assert_eq!(rows, 3);
+        // Order ids restart per run; the same id in another run is another order.
+        journal
+            .record("b", &[Event::Order(new.clone())])
+            .await
+            .expect("record");
+
+        assert_eq!(
+            journal.orders("a").await.expect("orders"),
+            vec![filled, rejected]
+        );
+        assert_eq!(journal.orders("b").await.expect("orders"), vec![new]);
+        assert!(journal.orders("missing").await.expect("orders").is_empty());
     }
 
     #[tokio::test]

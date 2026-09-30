@@ -1,33 +1,165 @@
+//! Execution: the [`Broker`] port, the simulated [`PaperBroker`] behind it, and the
+//! [`Portfolio`] that keeps cash and positions from the fills a broker reports.
+//!
+//! The engine sizes an order against the portfolio, hands it to the broker, and applies
+//! whatever [`ExecutionReport`]s come back through the order state machine
+//! ([`crate::order`]). Positions change only on reported fills, never on submission, so the
+//! same engine code works against a simulated venue and (M10) a real exchange.
+
 use std::collections::BTreeMap;
+use std::fmt;
+use std::mem;
 
 use chrono::{DateTime, Utc};
 
 use crate::instrument::InstrumentId;
+use crate::order::{ExecutionReport, Order, OrderId};
+use crate::ports::PortError;
 use crate::types::{Fill, Side};
 
-/// Multi-instrument simulated broker with proportional fees and fixed slippage.
+/// Where orders go. Implementations: [`PaperBroker`] (simulated fills), a live exchange
+/// adapter in M10.
 ///
-/// Positions are valued at the last price passed to [`mark`](Self::mark) or
-/// [`rebalance`](Self::rebalance). Fees are paid from cash, so fully-invested targets
-/// can leave cash marginally negative (by roughly fee + slippage).
+/// The interface is synchronous and non-blocking so the engine stays deterministic: `submit`
+/// only hands the order over, and every outcome — acceptance, fills, cancels, rejections —
+/// comes back later through [`poll`](Self::poll). A live adapter bridges to its async client
+/// internally (e.g. a channel to a background task) and must never block here.
+pub trait Broker: fmt::Debug + Send {
+    fn name(&self) -> &str;
+
+    /// Latest tradable price of `instrument`. Simulated venues fill market orders against
+    /// it; live adapters use the exchange's own prices and ignore it.
+    fn quote(&mut self, _instrument: &InstrumentId, _ts: DateTime<Utc>, _price: f64) {}
+
+    /// Hand over a new order (status `New`). An `Err` means the order never reached the
+    /// venue; the engine records it as rejected. Venue-side refusals are reported through
+    /// [`poll`](Self::poll) as [`ExecutionReport::Rejected`] instead.
+    fn submit(&mut self, order: &Order) -> Result<(), PortError>;
+
+    /// Ask the venue to cancel a working order; the outcome is reported through `poll`.
+    fn cancel(&mut self, id: OrderId, ts: DateTime<Utc>) -> Result<(), PortError>;
+
+    /// Reports since the last call, in the order they happened.
+    fn poll(&mut self) -> Vec<ExecutionReport>;
+}
+
+/// Simulated venue that fills market orders in full against the latest quote.
+///
+/// Fills are worsened by a fixed slippage and charged a proportional fee. An order submitted
+/// before any quote for its instrument rests until the next quote.
 #[derive(Debug, Clone)]
-pub struct SimBroker {
+pub struct PaperBroker {
+    fee_rate: f64,
+    slippage: f64,
+    quotes: BTreeMap<InstrumentId, f64>,
+    resting: Vec<Order>,
+    reports: Vec<ExecutionReport>,
+}
+
+impl PaperBroker {
+    pub const fn new(fee_rate: f64, slippage_bps: f64) -> Self {
+        Self {
+            fee_rate,
+            slippage: slippage_bps / 10_000.0,
+            quotes: BTreeMap::new(),
+            resting: Vec::new(),
+            reports: Vec::new(),
+        }
+    }
+
+    fn execute(&mut self, order: &Order, ts: DateTime<Utc>, price: f64) {
+        let exec_price = match order.side {
+            Side::Buy => price * (1.0 + self.slippage),
+            Side::Sell => price * (1.0 - self.slippage),
+        };
+        let fee = order.qty * exec_price * self.fee_rate;
+        self.reports.push(ExecutionReport::Filled {
+            id: order.id,
+            fill: Fill {
+                ts,
+                instrument: order.instrument.clone(),
+                side: order.side,
+                qty: order.qty,
+                price: exec_price,
+                fee,
+            },
+        });
+    }
+}
+
+impl Broker for PaperBroker {
+    fn name(&self) -> &'static str {
+        "paper"
+    }
+
+    fn quote(&mut self, instrument: &InstrumentId, ts: DateTime<Utc>, price: f64) {
+        self.quotes.insert(instrument.clone(), price);
+        let (due, keep): (Vec<Order>, Vec<Order>) = mem::take(&mut self.resting)
+            .into_iter()
+            .partition(|order| &order.instrument == instrument);
+        self.resting = keep;
+        for order in &due {
+            self.execute(order, ts, price);
+        }
+    }
+
+    fn submit(&mut self, order: &Order) -> Result<(), PortError> {
+        let ts = order.created_at;
+        if !(order.qty > 0.0 && order.qty.is_finite()) {
+            self.reports.push(ExecutionReport::Rejected {
+                id: order.id,
+                ts,
+                reason: format!("invalid quantity {}", order.qty),
+            });
+            return Ok(());
+        }
+        self.reports
+            .push(ExecutionReport::Accepted { id: order.id, ts });
+        match self.quotes.get(&order.instrument).copied() {
+            Some(price) if price > 0.0 => self.execute(order, ts, price),
+            _ => self.resting.push(order.clone()),
+        }
+        Ok(())
+    }
+
+    fn cancel(&mut self, id: OrderId, ts: DateTime<Utc>) -> Result<(), PortError> {
+        let index = self
+            .resting
+            .iter()
+            .position(|order| order.id == id)
+            .ok_or_else(|| PortError::Invalid(format!("order {id} is not open")))?;
+        self.resting.remove(index);
+        self.reports.push(ExecutionReport::Canceled {
+            id,
+            ts,
+            reason: "canceled on request".into(),
+        });
+        Ok(())
+    }
+
+    fn poll(&mut self) -> Vec<ExecutionReport> {
+        mem::take(&mut self.reports)
+    }
+}
+
+/// Cash, positions and valuation marks, changed only by applied fills.
+///
+/// Fees are paid from cash, so fully-invested targets can leave cash marginally negative
+/// (by roughly fee + slippage).
+#[derive(Debug, Clone)]
+pub struct Portfolio {
     cash: f64,
     positions: BTreeMap<InstrumentId, f64>,
     marks: BTreeMap<InstrumentId, f64>,
-    fee_rate: f64,
-    slippage: f64,
     min_notional: f64,
 }
 
-impl SimBroker {
-    pub fn new(cash: f64, fee_rate: f64, slippage_bps: f64) -> Self {
+impl Portfolio {
+    pub const fn new(cash: f64) -> Self {
         Self {
             cash,
             positions: BTreeMap::new(),
             marks: BTreeMap::new(),
-            fee_rate,
-            slippage: slippage_bps / 10_000.0,
             min_notional: 1.0,
         }
     }
@@ -67,15 +199,14 @@ impl SimBroker {
             })
     }
 
-    /// Trade `instrument` toward `target` exposure (fraction of total equity) at `price`.
-    /// Returns `None` when the change is below the minimum notional.
-    pub fn rebalance(
+    /// Mark `instrument` at `price` and size the trade that moves it to `target` exposure
+    /// (fraction of total equity). `None` when the change is below the minimum notional.
+    pub fn order_for(
         &mut self,
         instrument: &InstrumentId,
-        ts: DateTime<Utc>,
         price: f64,
         target: f64,
-    ) -> Option<Fill> {
+    ) -> Option<(Side, f64)> {
         self.mark(instrument, price);
         let equity = self.equity();
         let target_qty = if equity > 0.0 && price > 0.0 {
@@ -87,31 +218,25 @@ impl SimBroker {
         if (delta * price).abs() < self.min_notional {
             return None;
         }
-
         let side = if delta > 0.0 { Side::Buy } else { Side::Sell };
-        let exec_price = match side {
-            Side::Buy => price * (1.0 + self.slippage),
-            Side::Sell => price * (1.0 - self.slippage),
+        Some((side, delta.abs()))
+    }
+
+    /// Book an executed trade: cash pays notional plus fee, the position moves by `qty`.
+    pub fn apply(&mut self, fill: &Fill) {
+        let signed = match fill.side {
+            Side::Buy => fill.qty,
+            Side::Sell => -fill.qty,
         };
-        let fee = delta.abs() * exec_price * self.fee_rate;
-
-        self.cash -= delta.mul_add(exec_price, fee);
-        *self.positions.entry(instrument.clone()).or_insert(0.0) += delta;
-
-        Some(Fill {
-            ts,
-            instrument: instrument.clone(),
-            side,
-            qty: delta.abs(),
-            price: exec_price,
-            fee,
-        })
+        self.cash -= signed.mul_add(fill.price, fill.fee);
+        *self.positions.entry(fill.instrument.clone()).or_insert(0.0) += signed;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::order::OrderBook;
 
     fn id(symbol: &str) -> InstrumentId {
         InstrumentId::spot("test", symbol).expect("valid instrument")
@@ -121,83 +246,153 @@ mod tests {
         DateTime::from_timestamp(0, 0).expect("valid timestamp")
     }
 
+    /// Size, submit and book one trade the way the engine does; returns the fill.
+    fn trade(
+        portfolio: &mut Portfolio,
+        broker: &mut PaperBroker,
+        instrument: &InstrumentId,
+        price: f64,
+        target: f64,
+    ) -> Option<Fill> {
+        let mut book = OrderBook::default();
+        broker.quote(instrument, ts(), price);
+        let (side, qty) = portfolio.order_for(instrument, price, target)?;
+        let order = book.create(ts(), instrument, side, qty);
+        broker.submit(&order).expect("submitted");
+        let mut filled = None;
+        for report in broker.poll() {
+            book.apply(&report).expect("valid report");
+            if let ExecutionReport::Filled { fill, .. } = report {
+                portfolio.apply(&fill);
+                filled = Some(fill);
+            }
+        }
+        filled
+    }
+
     #[test]
     fn round_trip_without_costs_realises_pnl() {
-        let mut broker = SimBroker::new(1_000.0, 0.0, 0.0);
-        let buy = broker
-            .rebalance(&id("A"), ts(), 100.0, 1.0)
-            .expect("buy fill");
+        let (mut p, mut b) = (Portfolio::new(1_000.0), PaperBroker::new(0.0, 0.0));
+        let buy = trade(&mut p, &mut b, &id("A"), 100.0, 1.0).expect("buy fill");
         assert_eq!(buy.side, Side::Buy);
-        assert!((broker.position(&id("A")) - 10.0).abs() < 1e-9);
-        assert!(broker.cash().abs() < 1e-9);
+        assert!((p.position(&id("A")) - 10.0).abs() < 1e-9);
+        assert!(p.cash().abs() < 1e-9);
 
-        broker
-            .rebalance(&id("A"), ts(), 110.0, 0.0)
-            .expect("sell fill");
-        assert!(broker.position(&id("A")).abs() < 1e-9);
-        assert!((broker.cash() - 1_100.0).abs() < 1e-9);
+        trade(&mut p, &mut b, &id("A"), 110.0, 0.0).expect("sell fill");
+        assert!(p.position(&id("A")).abs() < 1e-9);
+        assert!((p.cash() - 1_100.0).abs() < 1e-9);
     }
 
     #[test]
     fn targets_are_fractions_of_total_equity() {
-        let mut broker = SimBroker::new(1_000.0, 0.0, 0.0);
-        broker.rebalance(&id("A"), ts(), 100.0, 0.5);
-        broker.rebalance(&id("B"), ts(), 50.0, 0.5);
-        assert!((broker.position(&id("A")) - 5.0).abs() < 1e-9);
-        assert!((broker.position(&id("B")) - 10.0).abs() < 1e-9);
+        let (mut p, mut b) = (Portfolio::new(1_000.0), PaperBroker::new(0.0, 0.0));
+        trade(&mut p, &mut b, &id("A"), 100.0, 0.5);
+        trade(&mut p, &mut b, &id("B"), 50.0, 0.5);
+        assert!((p.position(&id("A")) - 5.0).abs() < 1e-9);
+        assert!((p.position(&id("B")) - 10.0).abs() < 1e-9);
 
-        broker.mark(&id("A"), 200.0);
-        assert!((broker.equity() - 1_500.0).abs() < 1e-9);
+        p.mark(&id("A"), 200.0);
+        assert!((p.equity() - 1_500.0).abs() < 1e-9);
     }
 
     #[test]
     fn fees_and_slippage_reduce_equity() {
-        let mut broker = SimBroker::new(1_000.0, 0.001, 10.0);
-        broker.rebalance(&id("A"), ts(), 100.0, 1.0);
-        broker.rebalance(&id("A"), ts(), 100.0, 0.0);
-        assert!(broker.equity() < 1_000.0);
+        let (mut p, mut b) = (Portfolio::new(1_000.0), PaperBroker::new(0.001, 10.0));
+        trade(&mut p, &mut b, &id("A"), 100.0, 1.0);
+        trade(&mut p, &mut b, &id("A"), 100.0, 0.0);
+        assert!(p.equity() < 1_000.0);
     }
 
     #[test]
     fn tiny_changes_are_skipped() {
-        let mut broker = SimBroker::new(1_000.0, 0.0, 0.0);
-        assert!(broker.rebalance(&id("A"), ts(), 100.0, 0.0005).is_none());
+        let mut p = Portfolio::new(1_000.0);
+        assert!(p.order_for(&id("A"), 100.0, 0.0005).is_none());
     }
 
     #[test]
     fn zero_price_never_trades() {
-        let mut broker = SimBroker::new(1_000.0, 0.0, 0.0);
-        assert!(broker.rebalance(&id("A"), ts(), 0.0, 1.0).is_none());
+        let mut p = Portfolio::new(1_000.0);
+        assert!(p.order_for(&id("A"), 0.0, 1.0).is_none());
     }
 
     #[test]
     fn short_positions_profit_when_price_falls() {
-        let mut broker = SimBroker::new(1_000.0, 0.0, 0.0);
-        let fill = broker
-            .rebalance(&id("A"), ts(), 100.0, -1.0)
-            .expect("short fill");
+        let (mut p, mut b) = (Portfolio::new(1_000.0), PaperBroker::new(0.0, 0.0));
+        let fill = trade(&mut p, &mut b, &id("A"), 100.0, -1.0).expect("short fill");
         assert_eq!(fill.side, Side::Sell);
-        assert!((broker.position(&id("A")) + 10.0).abs() < 1e-9);
-        assert!((broker.cash() - 2_000.0).abs() < 1e-9);
+        assert!((p.position(&id("A")) + 10.0).abs() < 1e-9);
+        assert!((p.cash() - 2_000.0).abs() < 1e-9);
 
-        broker.mark(&id("A"), 90.0);
-        assert!((broker.equity() - 1_100.0).abs() < 1e-9);
+        p.mark(&id("A"), 90.0);
+        assert!((p.equity() - 1_100.0).abs() < 1e-9);
     }
 
     #[test]
     fn slippage_worsens_price_on_both_sides() {
-        let mut broker = SimBroker::new(1_000.0, 0.0, 10.0);
-        let buy = broker.rebalance(&id("A"), ts(), 100.0, 1.0).expect("buy");
-        let sell = broker.rebalance(&id("A"), ts(), 100.0, 0.0).expect("sell");
+        let (mut p, mut b) = (Portfolio::new(1_000.0), PaperBroker::new(0.0, 10.0));
+        let buy = trade(&mut p, &mut b, &id("A"), 100.0, 1.0).expect("buy");
+        let sell = trade(&mut p, &mut b, &id("A"), 100.0, 0.0).expect("sell");
         assert!((buy.price - 100.1).abs() < 1e-9);
         assert!((sell.price - 99.9).abs() < 1e-9);
     }
 
     #[test]
     fn fee_is_charged_on_notional() {
-        let mut broker = SimBroker::new(1_000.0, 0.01, 0.0);
-        let fill = broker.rebalance(&id("A"), ts(), 100.0, 0.5).expect("buy");
+        let (mut p, mut b) = (Portfolio::new(1_000.0), PaperBroker::new(0.01, 0.0));
+        let fill = trade(&mut p, &mut b, &id("A"), 100.0, 0.5).expect("buy");
         assert!((fill.fee - 5.0).abs() < 1e-9);
-        assert!((broker.cash() - 495.0).abs() < 1e-9);
+        assert!((p.cash() - 495.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn paper_orders_are_accepted_then_filled_against_the_quote() {
+        let mut broker = PaperBroker::new(0.0, 0.0);
+        let mut book = OrderBook::default();
+        broker.quote(&id("A"), ts(), 50.0);
+        let order = book.create(ts(), &id("A"), Side::Buy, 2.0);
+        broker.submit(&order).expect("submit");
+        let reports = broker.poll();
+        assert!(matches!(reports[0], ExecutionReport::Accepted { .. }));
+        let ExecutionReport::Filled { fill, .. } = &reports[1] else {
+            panic!("expected a fill, got {reports:?}");
+        };
+        assert!((fill.price - 50.0).abs() < 1e-12 && (fill.qty - 2.0).abs() < 1e-12);
+        assert!(broker.poll().is_empty(), "reports are delivered once");
+    }
+
+    #[test]
+    fn orders_without_a_quote_rest_until_one_arrives_or_are_canceled() {
+        let mut broker = PaperBroker::new(0.0, 0.0);
+        let mut book = OrderBook::default();
+        let first = book.create(ts(), &id("A"), Side::Buy, 1.0);
+        let second = book.create(ts(), &id("B"), Side::Buy, 1.0);
+        broker.submit(&first).expect("submit");
+        broker.submit(&second).expect("submit");
+        assert_eq!(broker.poll().len(), 2, "only acceptances so far");
+
+        broker.quote(&id("A"), ts(), 10.0);
+        let reports = broker.poll();
+        assert!(
+            matches!(&reports[..], [ExecutionReport::Filled { id, .. }] if *id == first.id),
+            "{reports:?}"
+        );
+
+        broker.cancel(second.id, ts()).expect("cancel resting");
+        assert!(matches!(
+            &broker.poll()[..],
+            [ExecutionReport::Canceled { .. }]
+        ));
+        assert!(broker.cancel(second.id, ts()).is_err(), "no longer open");
+    }
+
+    #[test]
+    fn invalid_quantities_are_rejected_by_the_venue() {
+        let mut broker = PaperBroker::new(0.0, 0.0);
+        let order = Order::new(OrderId(1), ts(), id("A"), Side::Buy, f64::NAN);
+        broker.submit(&order).expect("handed over");
+        assert!(matches!(
+            &broker.poll()[..],
+            [ExecutionReport::Rejected { .. }]
+        ));
     }
 }

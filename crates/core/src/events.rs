@@ -1,6 +1,6 @@
 //! Events: everything that happens, as data (ADR 0002).
 //!
-//! Market input (`Bar`) and engine output (`Signal`, `Target`, `Fill`, `RiskHalt`) share one
+//! Market input (`Bar`) and engine output (`Signal`, `Target`, `Order`, `Fill`, `RiskHalt`) share one
 //! type so they can flow over the bus, be appended to the event log and be replayed. The
 //! serialized form is internally tagged: `{"type":"fill", ...}`. New variants will be added
 //! by later milestones (orders, news, trader activity), hence `#[non_exhaustive]`.
@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::instrument::InstrumentId;
+use crate::order::Order;
 use crate::types::{Bar, Fill};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -30,6 +31,8 @@ pub enum Event {
         instrument: InstrumentId,
         target: f64,
     },
+    /// An order changed state (accepted, filled, canceled, rejected); carries the whole order.
+    Order(Order),
     /// An executed (simulated or real) trade.
     Fill(Fill),
     /// The daily-loss kill switch tripped; all targets go to zero for the rest of the day.
@@ -41,6 +44,7 @@ impl Event {
     pub const fn ts(&self) -> DateTime<Utc> {
         match self {
             Self::Bar { bar, .. } => bar.ts,
+            Self::Order(order) => order.updated_at,
             Self::Fill(fill) => fill.ts,
             Self::Signal { ts, .. } | Self::Target { ts, .. } | Self::RiskHalt { ts, .. } => *ts,
         }
@@ -52,6 +56,7 @@ impl Event {
             Self::Bar { .. } => "bar",
             Self::Signal { .. } => "signal",
             Self::Target { .. } => "target",
+            Self::Order(_) => "order",
             Self::Fill(_) => "fill",
             Self::RiskHalt { .. } => "risk_halt",
         }
@@ -69,6 +74,7 @@ pub struct Envelope {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::order::{OrderId, OrderStatus};
     use crate::types::Side;
 
     fn at(hours: i64) -> DateTime<Utc> {
@@ -115,6 +121,12 @@ mod tests {
                 ts: at(5),
                 equity: 900.0,
             },
+            Event::Order(Order {
+                reason: Some("kill switch".into()),
+                status: OrderStatus::Canceled,
+                updated_at: at(6),
+                ..Order::new(OrderId(7), at(4), id(), Side::Sell, 1.5)
+            }),
         ]
     }
 
@@ -138,7 +150,7 @@ mod tests {
     #[test]
     fn ts_reports_the_event_time() {
         let hours: Vec<_> = samples().iter().map(Event::ts).collect();
-        assert_eq!(hours, vec![at(1), at(2), at(3), at(4), at(5)]);
+        assert_eq!(hours, vec![at(1), at(2), at(3), at(4), at(5), at(6)]);
     }
 
     #[test]
