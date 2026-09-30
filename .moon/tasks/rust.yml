@@ -1,0 +1,52 @@
+$schema: 'https://moonrepo.dev/schemas/tasks.json'
+
+# Inherited by every Rust crate (language: 'rust'). Tasks run in the crate's own
+# directory, so cargo builds/lints/tests only that package (plus its dependencies).
+# `^:<task>` deps run the same task in upstream crates first (ordering only).
+# moon hashes a task by its own inputs, not its deps' results, so the inputs include
+# every crate's sources: a change in `core` must invalidate `cli:lint`. Coarse but
+# correct — with a handful of small crates the extra re-runs are cheap.
+inheritedBy:
+  languages: ['rust']
+
+tasks:
+  check:
+    command: 'cargo check --all-targets --all-features'
+    deps: ['^:check']
+    inputs: &rust-inputs
+      - '/crates/*/src/**/*'
+      - '/crates/*/tests/**/*'
+      - '/crates/*/Cargo.toml'
+      - '/Cargo.toml'
+      - '/Cargo.lock'
+      - '/clippy.toml'
+      - '/rustfmt.toml'
+      - '/rust-toolchain.toml'
+      - '/.cargo/config.toml'
+    toolchains: ['system']
+
+  # Strict lint gate: all targets + features, warnings are hard errors.
+  lint:
+    command: 'cargo clippy --all-targets --all-features -- -D warnings'
+    deps: ['^:lint']
+    inputs: *rust-inputs
+    toolchains: ['system']
+
+  test:
+    command: 'cargo test --all-features'
+    deps: ['^:test']
+    inputs: *rust-inputs
+    toolchains: ['system']
+
+  fmt:
+    command: 'cargo fmt --check'
+    inputs: *rust-inputs
+    toolchains: ['system']
+
+  # Autofix formatting in place (never in CI).
+  fmt-write:
+    command: 'cargo fmt'
+    toolchains: ['system']
+    options:
+      cache: false
+      runInCI: false

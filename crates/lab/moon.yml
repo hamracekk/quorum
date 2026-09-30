@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'lab'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'trader-lab'
+  description: 'Research: parameter sweeps and walk-forward evaluation'
+dependsOn:
+  - 'core'

@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'data'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'trader-data'
+  description: 'Market data download (Binance), Parquet storage, incremental sync'
+dependsOn:
+  - 'core'
