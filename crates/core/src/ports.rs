@@ -130,6 +130,21 @@ pub struct RunInfo {
     pub started_at: DateTime<Utc>,
 }
 
+/// One tool call made by an AI agent through the MCP server, as audited in the journal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AgentCall {
+    pub ts: DateTime<Utc>,
+    /// Client name reported by the agent at MCP `initialize` (e.g. `claude-code`).
+    pub agent: String,
+    pub tool: String,
+    /// The call's arguments as JSON text.
+    pub arguments: String,
+    pub ok: bool,
+    /// One-line result summary, or the error message.
+    pub summary: String,
+    pub duration_ms: u64,
+}
+
 /// Queryable record of decisions and executions, grouped by run (ADR 0002).
 #[async_trait]
 pub trait Journal: Send + Sync + fmt::Debug {
@@ -144,4 +159,10 @@ pub trait Journal: Send + Sync + fmt::Debug {
 
     /// Fills of `run_id` in execution order.
     async fn fills(&self, run_id: &str) -> Result<Vec<Fill>, PortError>;
+
+    /// Audit one agent tool call.
+    async fn record_agent_call(&self, call: &AgentCall) -> Result<(), PortError>;
+
+    /// The most recent agent tool calls, newest first.
+    async fn agent_calls(&self, limit: usize) -> Result<Vec<AgentCall>, PortError>;
 }

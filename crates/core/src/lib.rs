@@ -22,6 +22,6 @@ pub use engine::{Engine, EngineError};
 pub use events::{Envelope, Event};
 pub use instrument::{InstrumentError, InstrumentId, InstrumentKind, VenueId};
 pub use metrics::{Performance, Report};
-pub use ports::{BarStore, EventLog, Journal, MarketData, PortError, RunInfo, RunKind};
+pub use ports::{AgentCall, BarStore, EventLog, Journal, MarketData, PortError, RunInfo, RunKind};
 pub use strategy::Strategy;
 pub use types::{Bar, EquityPoint, Fill, Series, Side};
