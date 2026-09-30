@@ -1,9 +1,13 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, NaiveDate, Utc};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RiskLimits {
-    /// Maximum absolute exposure as a fraction of equity.
+    /// Maximum absolute exposure to any single symbol, as a fraction of equity.
     pub max_exposure: f64,
+    /// Maximum sum of absolute exposures across all symbols.
+    pub max_gross_exposure: f64,
     pub allow_short: bool,
     /// Flatten and stop trading for the rest of the UTC day once equity falls
     /// this fraction below the day's opening equity.
@@ -14,13 +18,14 @@ impl Default for RiskLimits {
     fn default() -> Self {
         Self {
             max_exposure: 1.0,
+            max_gross_exposure: 1.0,
             allow_short: false,
             max_daily_loss: 0.05,
         }
     }
 }
 
-/// Clamps strategy targets and enforces the daily-loss kill switch.
+/// Applies exposure limits to strategy targets and enforces the daily-loss kill switch.
 #[derive(Debug, Clone)]
 pub struct RiskManager {
     limits: RiskLimits,
@@ -57,16 +62,30 @@ impl RiskManager {
         self.halted
     }
 
-    pub fn clamp(&self, target: f64) -> f64 {
+    /// Risk-adjusted targets: all zero when halted; otherwise each target clamped to
+    /// the per-symbol limit, then all scaled down together if gross exposure is too high.
+    pub fn apply(&self, desired: &BTreeMap<String, f64>) -> BTreeMap<String, f64> {
         if self.halted {
-            return 0.0;
+            return desired.keys().map(|s| (s.clone(), 0.0)).collect();
         }
         let floor = if self.limits.allow_short {
             -self.limits.max_exposure
         } else {
             0.0
         };
-        target.clamp(floor, self.limits.max_exposure)
+        let mut targets: BTreeMap<String, f64> = desired
+            .iter()
+            .map(|(s, t)| (s.clone(), t.clamp(floor, self.limits.max_exposure)))
+            .collect();
+
+        let gross: f64 = targets.values().map(|t| t.abs()).sum();
+        if gross > self.limits.max_gross_exposure && gross > 0.0 {
+            let scale = self.limits.max_gross_exposure / gross;
+            for target in targets.values_mut() {
+                *target *= scale;
+            }
+        }
+        targets
     }
 }
 
@@ -78,30 +97,45 @@ mod tests {
         DateTime::from_timestamp(hours * 3_600, 0).expect("valid timestamp")
     }
 
+    fn targets(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
+        pairs.iter().map(|&(s, t)| (s.to_owned(), t)).collect()
+    }
+
     fn assert_close(actual: f64, expected: f64) {
         assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
     }
 
     #[test]
-    fn clamps_to_limits() {
+    fn clamps_each_symbol() {
         let risk = RiskManager::new(RiskLimits {
             max_exposure: 0.5,
+            max_gross_exposure: 10.0,
             ..RiskLimits::default()
         });
-        assert_close(risk.clamp(1.0), 0.5);
-        assert_close(risk.clamp(-1.0), 0.0);
+        let out = risk.apply(&targets(&[("A", 1.0), ("B", -1.0)]));
+        assert_close(out["A"], 0.5);
+        assert_close(out["B"], 0.0);
+    }
+
+    #[test]
+    fn scales_down_gross_exposure() {
+        let risk = RiskManager::new(RiskLimits::default());
+        let out = risk.apply(&targets(&[("A", 1.0), ("B", 1.0)]));
+        assert_close(out["A"], 0.5);
+        assert_close(out["B"], 0.5);
     }
 
     #[test]
     fn daily_loss_halts_until_next_day() {
         let mut risk = RiskManager::new(RiskLimits::default());
+        let want = targets(&[("A", 1.0)]);
         risk.update(at(0), 1_000.0);
         risk.update(at(5), 940.0);
         assert!(risk.halted());
-        assert_close(risk.clamp(1.0), 0.0);
+        assert_close(risk.apply(&want)["A"], 0.0);
 
         risk.update(at(24), 940.0);
         assert!(!risk.halted());
-        assert_close(risk.clamp(1.0), 1.0);
+        assert_close(risk.apply(&want)["A"], 1.0);
     }
 }

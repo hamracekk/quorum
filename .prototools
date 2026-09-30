@@ -1,0 +1,7 @@
+# Toolchain pins — managed by proto (https://moonrepo.dev/proto)
+# `proto use` installs everything below at the pinned versions.
+rust = "1.96.1"
+moon = "2.4.2"
+
+[settings]
+auto-install = true

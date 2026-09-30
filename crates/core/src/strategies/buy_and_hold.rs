@@ -2,7 +2,7 @@ use crate::strategy::Strategy;
 use crate::types::Bar;
 
 /// Baseline: go fully long on the first bar and never trade again.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct BuyAndHold {
     entered: bool,
 }
@@ -12,7 +12,7 @@ impl Strategy for BuyAndHold {
         "buy-and-hold"
     }
 
-    fn on_bar(&mut self, _bar: &Bar) -> Option<f64> {
+    fn on_bar(&mut self, _symbol: &str, _bar: &Bar) -> Option<f64> {
         if self.entered {
             return None;
         }

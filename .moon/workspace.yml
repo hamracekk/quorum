@@ -1,0 +1,15 @@
+# moonrepo workspace — trader
+$schema: 'https://moonrepo.dev/schemas/workspace.json'
+
+projects:
+  globs:
+    - 'crates/*'   # Rust crates (one cargo workspace, one moon project per crate)
+    - 'apps/*'     # (planned) desktop UI — Tauri frontend
+  sources:
+    # Root-level project: workspace-wide composite tasks (root:verify).
+    root: '.'
+
+vcs:
+  client: 'git'
+  provider: 'github'
+  defaultBranch: 'main'

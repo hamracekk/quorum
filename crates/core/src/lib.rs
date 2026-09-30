@@ -12,6 +12,7 @@ pub mod strategies;
 pub mod strategy;
 pub mod types;
 
-pub use backtest::{BacktestConfig, BacktestResult, run};
+pub use backtest::{BacktestConfig, BacktestResult, run, run_from};
+pub use metrics::{Performance, Report};
 pub use strategy::Strategy;
-pub use types::{Bar, EquityPoint, Fill, Side};
+pub use types::{Bar, EquityPoint, Fill, Series, Side};

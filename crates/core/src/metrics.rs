@@ -2,38 +2,33 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::types::{Bar, EquityPoint, Fill};
+use crate::types::{EquityPoint, Fill};
 
 const SECONDS_PER_YEAR: f64 = 365.25 * 86_400.0;
 
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct Report {
-    pub start_equity: f64,
-    pub end_equity: f64,
+/// Return and risk statistics of one equity curve.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub struct Performance {
     pub total_return: f64,
-    pub buy_hold_return: f64,
     pub cagr: f64,
     pub max_drawdown: f64,
     pub sharpe: f64,
-    pub trades: usize,
-    pub fees: f64,
 }
 
-impl Report {
-    pub fn compute(curve: &[EquityPoint], fills: &[Fill], bars: &[Bar]) -> Self {
+impl Performance {
+    /// Statistics of `curve` relative to the starting capital `initial`.
+    pub fn from_curve(initial: f64, curve: &[EquityPoint]) -> Self {
         let (Some(first), Some(last)) = (curve.first(), curve.last()) else {
             return Self::default();
         };
-        let start = first.equity;
-        let end = last.equity;
         let years = (last.ts - first.ts).num_seconds() as f64 / SECONDS_PER_YEAR;
-
-        let buy_hold_return = match (bars.first(), bars.last()) {
-            (Some(a), Some(b)) if a.open > 0.0 => b.close / a.open - 1.0,
-            _ => 0.0,
+        let growth = if initial > 0.0 {
+            last.equity / initial
+        } else {
+            1.0
         };
-        let cagr = if years > 0.0 && start > 0.0 && end > 0.0 {
-            (end / start).powf(1.0 / years) - 1.0
+        let cagr = if years > 0.0 && growth > 0.0 {
+            growth.powf(1.0 / years) - 1.0
         } else {
             0.0
         };
@@ -42,24 +37,48 @@ impl Report {
         } else {
             0.0
         };
-
         Self {
-            start_equity: start,
-            end_equity: end,
-            total_return: if start > 0.0 { end / start - 1.0 } else { 0.0 },
-            buy_hold_return,
+            total_return: growth - 1.0,
             cagr,
-            max_drawdown: max_drawdown(curve),
+            max_drawdown: max_drawdown(initial, curve),
             sharpe: sharpe(curve, bars_per_year),
+        }
+    }
+}
+
+/// Outcome of a backtest: the strategy next to the pure buy & hold benchmark.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Report {
+    pub initial_equity: f64,
+    pub end_equity: f64,
+    pub strategy: Performance,
+    /// Equal-weight buy & hold of the same symbols: no fees, no risk limits.
+    pub benchmark: Performance,
+    pub trades: usize,
+    pub fees: f64,
+}
+
+impl Report {
+    pub fn compute(
+        initial: f64,
+        curve: &[EquityPoint],
+        benchmark_curve: &[EquityPoint],
+        fills: &[Fill],
+    ) -> Self {
+        Self {
+            initial_equity: initial,
+            end_equity: curve.last().map_or(initial, |p| p.equity),
+            strategy: Performance::from_curve(initial, curve),
+            benchmark: Performance::from_curve(initial, benchmark_curve),
             trades: fills.len(),
             fees: fills.iter().map(|f| f.fee).sum(),
         }
     }
 }
 
-/// Largest peak-to-trough decline, as a positive fraction.
-pub fn max_drawdown(curve: &[EquityPoint]) -> f64 {
-    let mut peak = f64::MIN;
+/// Largest peak-to-trough decline as a positive fraction, starting from `initial`.
+pub fn max_drawdown(initial: f64, curve: &[EquityPoint]) -> f64 {
+    let mut peak = initial;
     let mut worst = 0.0_f64;
     for point in curve {
         peak = peak.max(point.equity);
@@ -84,27 +103,46 @@ pub fn sharpe(curve: &[EquityPoint], bars_per_year: f64) -> f64 {
     let mean = returns.iter().sum::<f64>() / n;
     let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
     let std = variance.sqrt();
-    if std == 0.0 {
-        0.0
-    } else {
+    if std > 0.0 {
         mean / std * bars_per_year.sqrt()
+    } else {
+        0.0
     }
 }
 
 impl fmt::Display for Report {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (s, b) = (&self.strategy, &self.benchmark);
+        writeln!(f, "                  strategy   buy & hold")?;
         writeln!(
             f,
-            "  equity        {:>12.2} -> {:.2}",
-            self.start_equity, self.end_equity
+            "  total return  {:>9.2}%  {:>9.2}%",
+            s.total_return * 100.0,
+            b.total_return * 100.0
         )?;
-        writeln!(f, "  total return  {:>11.2}%", self.total_return * 100.0)?;
-        writeln!(f, "  buy & hold    {:>11.2}%", self.buy_hold_return * 100.0)?;
-        writeln!(f, "  CAGR          {:>11.2}%", self.cagr * 100.0)?;
-        writeln!(f, "  max drawdown  {:>11.2}%", self.max_drawdown * 100.0)?;
-        writeln!(f, "  sharpe        {:>12.2}", self.sharpe)?;
-        writeln!(f, "  trades        {:>12}", self.trades)?;
-        write!(f, "  fees paid     {:>12.2}", self.fees)
+        writeln!(
+            f,
+            "  CAGR          {:>9.2}%  {:>9.2}%",
+            s.cagr * 100.0,
+            b.cagr * 100.0
+        )?;
+        writeln!(
+            f,
+            "  max drawdown  {:>9.2}%  {:>9.2}%",
+            s.max_drawdown * 100.0,
+            b.max_drawdown * 100.0
+        )?;
+        writeln!(f, "  sharpe        {:>10.2}  {:>10.2}", s.sharpe, b.sharpe)?;
+        writeln!(
+            f,
+            "  equity        {:.2} -> {:.2}",
+            self.initial_equity, self.end_equity
+        )?;
+        write!(
+            f,
+            "  trades        {}  (fees {:.2})",
+            self.trades, self.fees
+        )
     }
 }
 
@@ -127,12 +165,30 @@ mod tests {
 
     #[test]
     fn drawdown_uses_running_peak() {
-        let dd = max_drawdown(&curve(&[100.0, 120.0, 90.0, 130.0]));
+        let dd = max_drawdown(100.0, &curve(&[100.0, 120.0, 90.0, 130.0]));
         assert!((dd - 0.25).abs() < 1e-12);
+    }
+
+    #[test]
+    fn drawdown_counts_loss_from_initial_capital() {
+        let dd = max_drawdown(100.0, &curve(&[80.0, 90.0]));
+        assert!((dd - 0.2).abs() < 1e-12);
     }
 
     #[test]
     fn flat_curve_has_zero_sharpe() {
         assert!(sharpe(&curve(&[100.0, 100.0, 100.0]), 8_760.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn total_return_is_relative_to_initial() {
+        let perf = Performance::from_curve(100.0, &curve(&[110.0, 120.0]));
+        assert!((perf.total_return - 0.2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn empty_curve_is_neutral() {
+        let perf = Performance::from_curve(100.0, &[]);
+        assert!(perf.total_return.abs() < 1e-12);
     }
 }

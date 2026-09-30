@@ -1,0 +1,9 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'core'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'trader-core'
+  description: 'Domain types, strategies, broker, risk, metrics, backtest engine'

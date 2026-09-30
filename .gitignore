@@ -2,3 +2,7 @@
 /data
 *.csv
 .env
+
+# moon
+.moon/cache
+.moon/docker

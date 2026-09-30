@@ -1,0 +1,25 @@
+# Root-level project — workspace-wide composite tasks only (deps, `noop` itself).
+layer: 'automation'
+language: 'unknown'
+
+tasks:
+  # Every quality gate for every crate, maximally parallel (same coverage as CI).
+  #   moon run root:verify
+  verify:
+    command: 'noop'
+    deps:
+      - 'core:fmt'
+      - 'core:lint'
+      - 'core:test'
+      - 'data:fmt'
+      - 'data:lint'
+      - 'data:test'
+      - 'lab:fmt'
+      - 'lab:lint'
+      - 'lab:test'
+      - 'cli:fmt'
+      - 'cli:lint'
+      - 'cli:test'
+    options:
+      cache: false
+      runInCI: false
