@@ -7,7 +7,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::indicators::{Bollinger, Macd, MacdValue, Rsi};
 use crate::patterns::{Bias, Pattern, detect_at};
@@ -95,6 +95,13 @@ impl fmt::Display for Signal {
 impl Serialize for Signal {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.name())
+    }
+}
+
+impl<'de> Deserialize<'de> for Signal {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        name.parse().map_err(serde::de::Error::custom)
     }
 }
 

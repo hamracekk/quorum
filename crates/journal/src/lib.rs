@@ -5,6 +5,7 @@
 //! Queries are checked at runtime and covered by tests (compile-time checked macros would
 //! need `sqlx prepare` in CI; revisit when the schema grows).
 
+mod agents;
 mod error;
 
 pub use error::JournalError;
