@@ -116,27 +116,48 @@ impl BarStore for MemoryBarStore {
     }
 }
 
-/// Yields a fixed list of closed bars, then ends — a stand-in for a live websocket feed.
+/// Yields a fixed list of closed bars, then ends (or, with [`keep_open`](Self::keep_open),
+/// stays silent forever like a quiet market) — a stand-in for a live websocket feed.
 #[derive(Debug, Clone)]
 pub struct MemoryMarketStream {
     venue: VenueId,
     bars: Vec<(InstrumentId, Bar)>,
+    keep_open: bool,
 }
 
 impl MemoryMarketStream {
     pub const fn new(venue: VenueId, bars: Vec<(InstrumentId, Bar)>) -> Self {
-        Self { venue, bars }
+        Self {
+            venue,
+            bars,
+            keep_open: false,
+        }
+    }
+
+    /// After the bars, stay pending instead of ending the stream.
+    #[must_use]
+    pub const fn keep_open(mut self) -> Self {
+        self.keep_open = true;
+        self
     }
 }
 
 /// `Stream` over a queue, without pulling in a stream-utilities crate.
-struct Queue(VecDeque<StreamedBar>);
+struct Queue {
+    items: VecDeque<StreamedBar>,
+    keep_open: bool,
+}
 
 impl Stream for Queue {
     type Item = StreamedBar;
 
     fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.0.pop_front())
+        match self.items.pop_front() {
+            Some(item) => Poll::Ready(Some(item)),
+            // Never woken: nothing more will arrive, exactly like an idle feed.
+            None if self.keep_open => Poll::Pending,
+            None => Poll::Ready(None),
+        }
     }
 }
 
@@ -151,14 +172,17 @@ impl MarketStream for MemoryMarketStream {
         instruments: &[InstrumentId],
         _interval: &str,
     ) -> Result<BoxStream<'static, StreamedBar>, PortError> {
-        let queue = self
+        let items = self
             .bars
             .iter()
             .filter(|(instrument, _)| instruments.contains(instrument))
             .cloned()
             .map(Ok)
             .collect();
-        Ok(Box::pin(Queue(queue)))
+        Ok(Box::pin(Queue {
+            items,
+            keep_open: self.keep_open,
+        }))
     }
 }
 
