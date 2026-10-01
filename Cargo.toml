@@ -29,6 +29,8 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 thiserror = "2"
 # Backup archives (gzip-compressed tar, pure Rust backend).
 tar = "0.4"
+# News feeds: RSS 0.x/1.0/2.0, Atom and JSON Feed.
+feed-rs = "3"
 flate2 = "1"
 tokio-stream = "0.1"
 tokio-tungstenite = { version = "0.30", features = ["connect", "rustls-tls-webpki-roots"] }
@@ -42,6 +44,7 @@ wiremock = "0.6"
 trader-bus = { path = "crates/bus" }
 trader-core = { path = "crates/core" }
 trader-data = { path = "crates/data" }
+trader-news = { path = "crates/news" }
 trader-journal = { path = "crates/journal" }
 trader-lab = { path = "crates/lab" }
 trader-mcp = { path = "crates/mcp" }

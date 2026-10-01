@@ -2,7 +2,7 @@
 //!
 //! Adapters (Binance, Parquet, …) live in other crates and implement these traits; the
 //! engine, lab and CLI only ever see the traits. Ports are added in the milestone that
-//! first needs them: `LlmProvider` and `NewsSource` (M5), `TraderSource` (M7). The order-execution port, [`Broker`](crate::broker::Broker),
+//! first needs them: `LlmProvider` (M5b), `TraderSource` (M7). The order-execution port, [`Broker`](crate::broker::Broker),
 //! is synchronous and lives with the engine in [`crate::broker`].
 
 use std::error::Error as StdError;
@@ -21,6 +21,7 @@ use crate::agents::{
 };
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
+use crate::news::{NewsItem, NewsQuery, NewsSourceStats, StoredNews};
 use crate::order::Order;
 use crate::types::{Bar, Fill, Series};
 
@@ -107,6 +108,31 @@ pub trait EventLog: Send + Sync + fmt::Debug {
 
     /// Events with `start <= ts < end`, in sequence order.
     fn read(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<Envelope>, PortError>;
+}
+
+/// A news feed (RSS/Atom, …). Content is untrusted: adapters return plain, bounded text and
+/// http(s) links only, and never follow anything inside an item.
+#[async_trait]
+pub trait NewsSource: Send + Sync + fmt::Debug {
+    /// Configured source name, recorded on every item.
+    fn name(&self) -> &str;
+
+    /// The feed's current items, sanitized, without instrument tags. `fetched_at` is now.
+    async fn fetch(&self) -> Result<Vec<NewsItem>, PortError>;
+}
+
+/// Durable news items (M5a), kept with the journal.
+#[async_trait]
+pub trait NewsStore: Send + Sync + fmt::Debug {
+    /// Store `items`, skipping duplicates (same canonical URL, or the same headline within
+    /// `news::DUPLICATE_WINDOW_HOURS`).
+    async fn store_news(&self, items: &[NewsItem]) -> Result<StoredNews, PortError>;
+
+    /// Items matching `query`, newest first.
+    async fn news(&self, query: &NewsQuery) -> Result<Vec<NewsItem>, PortError>;
+
+    /// Item count and newest item per source.
+    async fn news_stats(&self) -> Result<Vec<NewsSourceStats>, PortError>;
 }
 
 /// Agents' shared knowledge and messages (ADR 0003), kept with the journal.

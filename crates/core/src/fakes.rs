@@ -12,8 +12,10 @@ use futures_core::stream::BoxStream;
 
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
+use crate::news::NewsItem;
 use crate::ports::{
-    BarStore, EventLog, MarketData, MarketStream, Notification, Notifier, PortError, StreamedBar,
+    BarStore, EventLog, MarketData, MarketStream, NewsSource, Notification, Notifier, PortError,
+    StreamedBar,
 };
 use crate::types::{Bar, Series};
 
@@ -213,6 +215,54 @@ impl EventLog for MemoryEventLog {
             .filter(|e| e.event.ts() >= start && e.event.ts() < end)
             .cloned()
             .collect())
+    }
+}
+
+/// A news feed serving fixed items (or always failing), counting fetches.
+#[derive(Debug, Default)]
+pub struct MemoryNewsSource {
+    name: String,
+    items: Vec<NewsItem>,
+    fail: bool,
+    fetches: Mutex<usize>,
+}
+
+impl MemoryNewsSource {
+    pub fn new(name: &str, items: Vec<NewsItem>) -> Self {
+        Self {
+            name: name.to_owned(),
+            items,
+            ..Self::default()
+        }
+    }
+
+    /// A source whose every fetch fails, like a feed that is down.
+    pub fn failing(name: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            fail: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn fetches(&self) -> usize {
+        *self.fetches.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+#[async_trait]
+impl NewsSource for MemoryNewsSource {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn fetch(&self) -> Result<Vec<NewsItem>, PortError> {
+        *self.fetches.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        if self.fail {
+            Err(PortError::Invalid(format!("{} is down", self.name)))
+        } else {
+            Ok(self.items.clone())
+        }
     }
 }
 

@@ -14,11 +14,11 @@ use trader_core::{AgentStore, PortError};
 
 use crate::{JournalError, SqliteJournal, format_ts, parse_ts, port};
 
-fn to_json(value: &impl Serialize) -> Result<String, JournalError> {
+pub(crate) fn to_json(value: &impl Serialize) -> Result<String, JournalError> {
     serde_json::to_string(value).map_err(|e| JournalError::Corrupt(format!("encode: {e}")))
 }
 
-fn from_json<T: DeserializeOwned>(column: &str, text: &str) -> Result<T, JournalError> {
+pub(crate) fn from_json<T: DeserializeOwned>(column: &str, text: &str) -> Result<T, JournalError> {
     serde_json::from_str(text).map_err(|e| JournalError::Corrupt(format!("{column}: {e}")))
 }
 
@@ -69,7 +69,7 @@ fn message_from(row: &SqliteRow) -> Result<AgentMessage, JournalError> {
 
 /// Plain words → an FTS5 query matching all of them, with no operators interpreted.
 /// `None` when the text has no searchable word.
-fn fts_query(text: &str) -> Option<String> {
+pub(crate) fn fts_query(text: &str) -> Option<String> {
     let words: Vec<String> = text
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
@@ -79,7 +79,7 @@ fn fts_query(text: &str) -> Option<String> {
     (!words.is_empty()).then(|| words.join(" "))
 }
 
-fn limit(n: usize) -> i64 {
+pub(crate) fn limit(n: usize) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
 }
 

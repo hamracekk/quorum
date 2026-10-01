@@ -7,6 +7,7 @@
 
 mod agents;
 mod error;
+mod news;
 
 pub use error::JournalError;
 
