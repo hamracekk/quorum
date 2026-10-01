@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'ai'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'trader-ai'
+  description: 'LLM providers (Claude API, Ollama) and structured news-event extraction'
+dependsOn:
+  - 'core'

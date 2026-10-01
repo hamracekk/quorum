@@ -24,6 +24,7 @@ The journal (ADR 0002): a SQLite record of **decisions and executions, grouped b
 | `findings` (0004) | `id`, `agent`, `role`, `created_at`, `updated_at`, `kind`, `instruments` (JSON), `claim`, `hypothesis` (JSON), `evidence` (JSON), `status`, `verdict` (AG-2), `supersedes`; `findings_fts` (FTS5 over claims, insert trigger) |
 | `agent_messages` (0004) | `id`, `ts`, `thread` (first message id), `sender`, `recipient` (agent, `operator`, `all`), `body`, `refs` (JSON); `agent_message_reads` (`message_id`, `reader`, `read_at`) for per-reader unread |
 | `findings.confidence` · `finding_evaluations` (0005) | Author's probability (0–1) · every verdict: `finding_id`, `ts`, `by_whom`, `status`, `verdict` (JSON) |
+| `news_extractions` (0007) | `url`, `prompt_version`, `tier` (`local`\|`remote`), `model`, `ts`, `status` (`ok`\|`rejected`\|`failed`), `relevant`, `events` (JSON), `error`, `input_tokens`, `output_tokens` — cache, record and budget source |
 | `news_items` (0006) | `url` (canonical, PK), `source`, `title`, `title_key` (headline words, 48 h dedupe), `summary`, `published_at`, `fetched_at`, `instruments` (JSON); `news_fts` (FTS5 over title + summary) |
 | `agent_controls` (0004) | `agent` (id or `*`), `enabled`, `reason`, `updated_at` — runtime switches |
 | `orders` (0003) | `run_id`, `order_id`, `instrument`, `side`, `qty`, `status`, `filled_qty`, `avg_price`, `fees`, `reason`, `created_at`, `updated_at` — one row per order, upserted by every `order` event so it holds the latest state |

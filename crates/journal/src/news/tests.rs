@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use trader_core::InstrumentId;
+use trader_core::news::{Direction, EventType, Horizon, Magnitude, NewsEvent};
 
 use super::*;
 
@@ -127,4 +128,128 @@ async fn news_filters_by_source_instrument_time_and_words() {
     assert_eq!(stats.len(), 2);
     assert_eq!((stats[0].source.as_str(), stats[0].items), ("coindesk", 2));
     assert_eq!(stats[0].latest, Some(at(10)));
+}
+
+fn extraction(
+    url: &str,
+    tier: &str,
+    status: ExtractionStatus,
+    tokens: u64,
+    hour: i64,
+) -> Extraction {
+    Extraction {
+        url: format!("https://news.example.com/{url}"),
+        prompt_version: "news-v1".into(),
+        tier: tier.into(),
+        model: format!("{tier}/model"),
+        ts: at(hour),
+        status,
+        relevant: status == ExtractionStatus::Ok,
+        events: if status == ExtractionStatus::Ok {
+            vec![NewsEvent {
+                url: format!("https://news.example.com/{url}"),
+                instrument: btc(),
+                direction: Direction::Bullish,
+                magnitude: Magnitude::High,
+                confidence: 0.8,
+                horizon: Horizon::Days,
+                event_type: EventType::Etf,
+                rationale: "Record ETF inflows.".into(),
+                published_at: at(0),
+                model: format!("{tier}/model"),
+                extracted_at: at(hour),
+            }]
+        } else {
+            vec![]
+        },
+        error: (status != ExtractionStatus::Ok).then(|| "schema violation".into()),
+        input_tokens: tokens,
+        output_tokens: tokens / 10,
+    }
+}
+
+#[tokio::test]
+async fn extractions_are_cached_per_prompt_and_tier_and_count_tokens() {
+    let journal = SqliteJournal::in_memory().await.expect("journal");
+    journal
+        .store_news(&[
+            item("a", "coindesk", "Bitcoin ETF sees record inflows", 0),
+            item("b", "coindesk", "Solana upgrade ships", 1),
+        ])
+        .await
+        .expect("store");
+    let pending = journal
+        .unextracted("news-v1", "local", 10)
+        .await
+        .expect("pending");
+    assert_eq!(pending.len(), 2);
+
+    let local = extraction("a", "local", ExtractionStatus::Ok, 500, 2);
+    journal.record_extraction(&local).await.expect("record");
+    journal
+        .record_extraction(&extraction(
+            "b",
+            "local",
+            ExtractionStatus::Rejected,
+            400,
+            2,
+        ))
+        .await
+        .expect("record");
+    let remote = extraction("a", "remote", ExtractionStatus::Ok, 1_000, 3);
+    journal.record_extraction(&remote).await.expect("record");
+
+    assert!(
+        journal
+            .unextracted("news-v1", "local", 10)
+            .await
+            .expect("pending")
+            .is_empty(),
+        "attempted items, rejected ones included, are not sent again"
+    );
+    assert_eq!(
+        journal
+            .unextracted("news-v2", "local", 10)
+            .await
+            .expect("pending")
+            .len(),
+        2,
+        "a new prompt version re-reads everything"
+    );
+    assert_eq!(
+        journal
+            .unextracted("news-v1", "remote", 10)
+            .await
+            .expect("pending")
+            .len(),
+        1
+    );
+    journal
+        .record_extraction(&extraction("b", "remote", ExtractionStatus::Failed, 0, 4))
+        .await
+        .expect("record");
+    assert_eq!(
+        journal
+            .unextracted("news-v1", "remote", 10)
+            .await
+            .expect("pending")
+            .len(),
+        1,
+        "a failed attempt (provider down) is retried later"
+    );
+
+    let urls = vec![local.url.clone()];
+    let stored = journal
+        .extractions(&urls, "news-v1")
+        .await
+        .expect("extractions");
+    assert_eq!(stored, vec![local.clone(), remote.clone()]);
+
+    let usage = journal.token_usage(at(0)).await.expect("usage");
+    assert_eq!(usage.local, 500 + 50 + 400 + 40);
+    assert_eq!((usage.remote, usage.remote_calls), (1_100, 1));
+    assert_eq!(
+        journal.token_usage(at(10)).await.expect("usage"),
+        TokenUsage::default()
+    );
 }

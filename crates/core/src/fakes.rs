@@ -14,8 +14,8 @@ use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
 use crate::news::NewsItem;
 use crate::ports::{
-    BarStore, EventLog, MarketData, MarketStream, NewsSource, Notification, Notifier, PortError,
-    StreamedBar,
+    BarStore, EventLog, LlmProvider, LlmRequest, LlmResponse, MarketData, MarketStream, NewsSource,
+    Notification, Notifier, PortError, StreamedBar,
 };
 use crate::types::{Bar, Series};
 
@@ -263,6 +263,81 @@ impl NewsSource for MemoryNewsSource {
         } else {
             Ok(self.items.clone())
         }
+    }
+}
+
+/// A language model that gives the same answer to every request (or always fails), counting
+/// calls and keeping the requests it saw.
+#[derive(Debug, Default)]
+pub struct MemoryLlm {
+    name: String,
+    model: String,
+    answer: Option<String>,
+    tokens: u64,
+    requests: Mutex<Vec<LlmRequest>>,
+}
+
+impl MemoryLlm {
+    /// Answers `text`, reporting `tokens` input tokens and `tokens / 10` output tokens.
+    pub fn answering(name: &str, text: &str, tokens: u64) -> Self {
+        Self {
+            name: name.to_owned(),
+            model: format!("{name}-model"),
+            answer: Some(text.to_owned()),
+            tokens,
+            ..Self::default()
+        }
+    }
+
+    /// Every request fails, like a model server that is down.
+    pub fn failing(name: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            model: format!("{name}-model"),
+            ..Self::default()
+        }
+    }
+
+    pub fn calls(&self) -> usize {
+        self.requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+    }
+
+    pub fn requests(&self) -> Vec<LlmRequest> {
+        self.requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[async_trait]
+impl LlmProvider for MemoryLlm {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    async fn complete(&self, request: &LlmRequest) -> Result<LlmResponse, PortError> {
+        self.requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(request.clone());
+        self.answer.as_ref().map_or_else(
+            || Err(PortError::Invalid(format!("{} is down", self.name))),
+            |text| {
+                Ok(LlmResponse {
+                    text: text.clone(),
+                    input_tokens: self.tokens,
+                    output_tokens: self.tokens / 10,
+                })
+            },
+        )
     }
 }
 

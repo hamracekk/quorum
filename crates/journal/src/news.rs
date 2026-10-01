@@ -1,11 +1,12 @@
 //! `NewsStore` on the journal's SQLite database (migration `0006_news.sql`).
 
 use async_trait::async_trait;
-use chrono::Duration;
+use chrono::{DateTime, Duration, Utc};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 use trader_core::news::{
-    DUPLICATE_WINDOW_HOURS, NewsItem, NewsQuery, NewsSourceStats, StoredNews, title_key,
+    DUPLICATE_WINDOW_HOURS, Extraction, ExtractionStatus, NewsItem, NewsQuery, NewsSourceStats,
+    StoredNews, TokenUsage, title_key,
 };
 use trader_core::{NewsStore, PortError};
 
@@ -27,7 +28,142 @@ fn news_from(row: &SqliteRow) -> Result<NewsItem, JournalError> {
     })
 }
 
+const fn status_text(status: ExtractionStatus) -> &'static str {
+    match status {
+        ExtractionStatus::Ok => "ok",
+        ExtractionStatus::Rejected => "rejected",
+        ExtractionStatus::Failed => "failed",
+    }
+}
+
+fn extraction_from(row: &SqliteRow) -> Result<Extraction, JournalError> {
+    let ts: String = row.try_get("ts")?;
+    let status: String = row.try_get("status")?;
+    let events: String = row.try_get("events")?;
+    let tokens = |name: &str| -> Result<u64, JournalError> {
+        let value: i64 = row.try_get(name)?;
+        Ok(u64::try_from(value).unwrap_or(0))
+    };
+    Ok(Extraction {
+        url: row.try_get("url")?,
+        prompt_version: row.try_get("prompt_version")?,
+        tier: row.try_get("tier")?,
+        model: row.try_get("model")?,
+        ts: parse_ts(&ts)?,
+        status: match status.as_str() {
+            "ok" => ExtractionStatus::Ok,
+            "rejected" => ExtractionStatus::Rejected,
+            "failed" => ExtractionStatus::Failed,
+            other => {
+                return Err(JournalError::Corrupt(format!(
+                    "extraction status `{other}`"
+                )));
+            }
+        },
+        relevant: row.try_get("relevant")?,
+        events: from_json("events", &events)?,
+        error: row.try_get("error")?,
+        input_tokens: tokens("input_tokens")?,
+        output_tokens: tokens("output_tokens")?,
+    })
+}
+
+fn tokens(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
 impl SqliteJournal {
+    async fn select_unextracted(
+        &self,
+        prompt_version: &str,
+        tier: &str,
+        max: usize,
+    ) -> Result<Vec<NewsItem>, JournalError> {
+        let rows = sqlx::query(
+            "SELECT n.url, n.source, n.title, n.summary, n.published_at, n.fetched_at, \
+             n.instruments FROM news_items n \
+             WHERE NOT EXISTS (SELECT 1 FROM news_extractions e WHERE e.url = n.url \
+                               AND e.prompt_version = ? AND e.tier = ? \
+                               AND e.status <> 'failed') \
+             ORDER BY n.published_at DESC, n.url LIMIT ?",
+        )
+        .bind(prompt_version)
+        .bind(tier)
+        .bind(limit(max))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(news_from).collect()
+    }
+
+    async fn upsert_extraction(&self, extraction: &Extraction) -> Result<(), JournalError> {
+        sqlx::query(
+            "INSERT INTO news_extractions (url, prompt_version, tier, model, ts, status, \
+             relevant, events, error, input_tokens, output_tokens) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+             ON CONFLICT (url, prompt_version, tier) DO UPDATE SET model = excluded.model, \
+             ts = excluded.ts, status = excluded.status, relevant = excluded.relevant, \
+             events = excluded.events, error = excluded.error, \
+             input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens",
+        )
+        .bind(&extraction.url)
+        .bind(&extraction.prompt_version)
+        .bind(&extraction.tier)
+        .bind(&extraction.model)
+        .bind(format_ts(extraction.ts))
+        .bind(status_text(extraction.status))
+        .bind(extraction.relevant)
+        .bind(to_json(&extraction.events)?)
+        .bind(extraction.error.as_deref())
+        .bind(tokens(extraction.input_tokens))
+        .bind(tokens(extraction.output_tokens))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn select_extractions(
+        &self,
+        urls: &[String],
+        prompt_version: &str,
+    ) -> Result<Vec<Extraction>, JournalError> {
+        let rows = sqlx::query(
+            "SELECT url, prompt_version, tier, model, ts, status, relevant, events, error, \
+             input_tokens, output_tokens FROM news_extractions \
+             WHERE url IN (SELECT value FROM json_each(?)) AND prompt_version = ? \
+             ORDER BY url, tier",
+        )
+        .bind(to_json(&urls)?)
+        .bind(prompt_version)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(extraction_from).collect()
+    }
+
+    async fn select_token_usage(&self, since: DateTime<Utc>) -> Result<TokenUsage, JournalError> {
+        let rows = sqlx::query(
+            "SELECT tier, SUM(input_tokens + output_tokens) AS spent, \
+             SUM(CASE WHEN status <> 'failed' THEN 1 ELSE 0 END) AS calls \
+             FROM news_extractions WHERE ts >= ? GROUP BY tier",
+        )
+        .bind(format_ts(since))
+        .fetch_all(&self.pool)
+        .await?;
+        let mut usage = TokenUsage::default();
+        for row in &rows {
+            let tier: String = row.try_get("tier")?;
+            let spent: i64 = row.try_get("spent")?;
+            let calls: i64 = row.try_get("calls")?;
+            let spent = u64::try_from(spent).unwrap_or(0);
+            if tier == "local" {
+                usage.local = spent;
+            } else {
+                usage.remote = spent;
+                usage.remote_calls = u64::try_from(calls).unwrap_or(0);
+            }
+        }
+        Ok(usage)
+    }
+
     async fn insert_news(&self, items: &[NewsItem]) -> Result<StoredNews, JournalError> {
         let mut stored = StoredNews::default();
         let window = Duration::hours(DUPLICATE_WINDOW_HOURS);
@@ -149,6 +285,35 @@ impl NewsStore for SqliteJournal {
 
     async fn news_stats(&self) -> Result<Vec<NewsSourceStats>, PortError> {
         self.select_news_stats().await.map_err(port)
+    }
+
+    async fn unextracted(
+        &self,
+        prompt_version: &str,
+        tier: &str,
+        limit: usize,
+    ) -> Result<Vec<NewsItem>, PortError> {
+        self.select_unextracted(prompt_version, tier, limit)
+            .await
+            .map_err(port)
+    }
+
+    async fn record_extraction(&self, extraction: &Extraction) -> Result<(), PortError> {
+        self.upsert_extraction(extraction).await.map_err(port)
+    }
+
+    async fn extractions(
+        &self,
+        urls: &[String],
+        prompt_version: &str,
+    ) -> Result<Vec<Extraction>, PortError> {
+        self.select_extractions(urls, prompt_version)
+            .await
+            .map_err(port)
+    }
+
+    async fn token_usage(&self, since: DateTime<Utc>) -> Result<TokenUsage, PortError> {
+        self.select_token_usage(since).await.map_err(port)
     }
 }
 
