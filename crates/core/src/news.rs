@@ -55,6 +55,108 @@ pub struct NewsSourceStats {
     pub latest: Option<DateTime<Utc>>,
 }
 
+/// Which way an event pushes an asset, as the extractor read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Direction {
+    Bullish,
+    Bearish,
+    Neutral,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Magnitude {
+    Low,
+    Medium,
+    High,
+}
+
+/// How long the extractor expects the effect to matter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Horizon {
+    Hours,
+    Days,
+    Weeks,
+}
+
+/// What kind of news it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventType {
+    Regulation,
+    Security,
+    Etf,
+    Listing,
+    Macro,
+    Adoption,
+    Technology,
+    Flows,
+    Legal,
+    Other,
+}
+
+/// One typed event extracted from a news item (M5b). A reading of untrusted text by a model:
+/// an input to scoring (M6) and the ensemble (M8), never an instruction.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NewsEvent {
+    /// Canonical URL of the news item it was read from.
+    pub url: String,
+    pub instrument: InstrumentId,
+    pub direction: Direction,
+    pub magnitude: Magnitude,
+    /// The model's confidence in its reading, 0–1.
+    pub confidence: f64,
+    pub horizon: Horizon,
+    pub event_type: EventType,
+    /// One sentence on why (plain text, bounded).
+    pub rationale: String,
+    /// Publish time of the news item.
+    pub published_at: DateTime<Utc>,
+    /// `provider/model` that produced it, e.g. `claude/claude-opus-5-5`.
+    pub model: String,
+    pub extracted_at: DateTime<Utc>,
+}
+
+/// How an extraction attempt ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtractionStatus {
+    /// Valid output, stored (possibly with zero events: not market-relevant).
+    Ok,
+    /// The model answered but the output broke the schema or the rules; discarded.
+    Rejected,
+    /// No usable answer (provider error, refusal, truncation).
+    Failed,
+}
+
+/// One extraction attempt of one news item by one provider — also the cache that keeps the
+/// same item from being sent to the same model twice (per prompt version).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Extraction {
+    pub url: String,
+    pub prompt_version: String,
+    /// `local` (cheap first pass) or `remote` (escalation).
+    pub tier: String,
+    pub model: String,
+    pub ts: DateTime<Utc>,
+    pub status: ExtractionStatus,
+    pub relevant: bool,
+    pub events: Vec<NewsEvent>,
+    pub error: Option<String>,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+/// Tokens spent per tier since a moment (the daily budget looks at today).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct TokenUsage {
+    pub local: u64,
+    pub remote: u64,
+    pub remote_calls: u64,
+}
+
 /// A headline reduced to its words: lower-case alphanumerics joined by single spaces, so the
 /// same story from two feeds (different punctuation, case, trailing site names aside) matches.
 pub fn title_key(title: &str) -> String {

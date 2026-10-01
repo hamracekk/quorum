@@ -2844,6 +2844,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "trader-ai"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "trader-core",
+ "wiremock",
+]
+
+[[package]]
 name = "trader-bus"
 version = "0.1.0"
 dependencies = [
@@ -3003,6 +3019,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "trader-ai",
  "trader-bus",
  "trader-core",
  "trader-data",

@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::instrument::InstrumentId;
+use crate::news::NewsEvent;
 use crate::order::Order;
 use crate::types::{Bar, Fill};
 
@@ -37,6 +38,9 @@ pub enum Event {
     Fill(Fill),
     /// The daily-loss kill switch tripped; all targets go to zero for the rest of the day.
     RiskHalt { ts: DateTime<Utc>, equity: f64 },
+    /// A typed event extracted from a news item (M5b). Recorded so backtests replay the
+    /// reading instead of calling the model again.
+    NewsEvent(NewsEvent),
 }
 
 impl Event {
@@ -47,6 +51,7 @@ impl Event {
             Self::Order(order) => order.updated_at,
             Self::Fill(fill) => fill.ts,
             Self::Signal { ts, .. } | Self::Target { ts, .. } | Self::RiskHalt { ts, .. } => *ts,
+            Self::NewsEvent(event) => event.extracted_at,
         }
     }
 
@@ -59,6 +64,7 @@ impl Event {
             Self::Order(_) => "order",
             Self::Fill(_) => "fill",
             Self::RiskHalt { .. } => "risk_halt",
+            Self::NewsEvent(_) => "news_event",
         }
     }
 }

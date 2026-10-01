@@ -13,8 +13,8 @@ depends on no internal crate.
 | `types.rs` | `Bar` (keyed by **open** time), `Series` (one instrument's bars), `Fill`, `Side`, `EquityPoint` |
 | `events.rs` | `Event` (bar, signal, target, fill, risk_halt; tagged JSON) and `Envelope` (with log `seq`) |
 | `engine.rs` | `Engine`: event-driven core — bars in (time order), decision events out; used by backtest, replay and live |
-| `ports.rs` | Port traits `MarketData`, `MarketStream` (async), `BarStore`, `EventLog`, `Journal`, `AgentStore`, `NewsSource`, `NewsStore`, `Notifier` (async), `RunInfo`/`RunKind`, `PortError` |
-| `fakes.rs` | In-memory `MemoryMarketData`, `MemoryMarketStream`, `MemoryBarStore`, `MemoryEventLog`, `MemoryNewsSource`, `MemoryNotifier` for tests in any crate |
+| `ports.rs` | Port traits `MarketData`, `MarketStream` (async), `BarStore`, `EventLog`, `Journal`, `AgentStore`, `NewsSource`, `NewsStore`, `LlmProvider`, `Notifier` (async), `RunInfo`/`RunKind`, `PortError` |
+| `fakes.rs` | In-memory `MemoryMarketData`, `MemoryMarketStream`, `MemoryBarStore`, `MemoryEventLog`, `MemoryNewsSource`, `MemoryLlm`, `MemoryNotifier` for tests in any crate |
 | `indicators.rs` | Streaming `Ema`, `Rsi` (Wilder), `Macd`, `Bollinger` |
 | `patterns.rs` | 13 candlestick patterns with bias; `detect_at` uses only bars up to `i` |
 | `signals.rs` | `Signal` (patterns + 8 indicator events), `SignalDetector` (streaming, fires on crossings), `occurrences` |
@@ -22,7 +22,7 @@ depends on no internal crate.
 | `strategies/` | `SmaCross`, `BuyAndHold`, `SignalFollower` (trade chosen signals, hold N bars), `PerInstrument` (one instance per instrument, equal weight), `Sma` |
 | `broker.rs` | `Broker` port (sync, non-blocking: `submit`/`cancel`, outcomes via `poll`), `PaperBroker` (fills market orders against the latest quote with fees + slippage), `Portfolio` (cash, positions, marks; order sizing with min notional; changed only by fills) |
 | `agents.rs` | ADR 0003 types: `NewFinding`/`Finding` (kind, claim, typed `Hypothesis`, `Evidence`, confidence, status, supersession, latest `Verdict`), `TrackRecord` (hit rate, Brier), `NewMessage`/`AgentMessage`, `AgentControl`, agent-id rules and shape validation |
-| `news.rs` | `NewsItem`, `NewsQuery`, `StoredNews`, `NewsSourceStats`, `title_key` (headline dedupe key), `DUPLICATE_WINDOW_HOURS` |
+| `news.rs` | `NewsItem`, `NewsQuery`, `StoredNews`, `NewsSourceStats`, `title_key`, `DUPLICATE_WINDOW_HOURS`; M5b: `NewsEvent` (direction, magnitude, confidence, horizon, event type), `Extraction`, `TokenUsage` |
 | `order.rs` | `Order`, `OrderId`, `OrderStatus`, `ExecutionReport`, `OrderBook`: the order state machine, rejecting illegal transitions and overfills |
 | `risk.rs` | `RiskLimits`, `RiskManager`: per-instrument and gross exposure caps, daily-loss kill switch |
 | `backtest.rs` | `run` / `run_from` (warm-up) / `run_with_events`: merge series and feed the `Engine`; `BacktestConfig`, `BacktestResult` |

@@ -2,7 +2,7 @@
 //!
 //! Adapters (Binance, Parquet, …) live in other crates and implement these traits; the
 //! engine, lab and CLI only ever see the traits. Ports are added in the milestone that
-//! first needs them: `LlmProvider` (M5b), `TraderSource` (M7). The order-execution port, [`Broker`](crate::broker::Broker),
+//! first needs them: `TraderSource` (M7). The order-execution port, [`Broker`](crate::broker::Broker),
 //! is synchronous and lives with the engine in [`crate::broker`].
 
 use std::error::Error as StdError;
@@ -21,7 +21,7 @@ use crate::agents::{
 };
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
-use crate::news::{NewsItem, NewsQuery, NewsSourceStats, StoredNews};
+use crate::news::{Extraction, NewsItem, NewsQuery, NewsSourceStats, StoredNews, TokenUsage};
 use crate::order::Order;
 use crate::types::{Bar, Fill, Series};
 
@@ -121,6 +121,38 @@ pub trait NewsSource: Send + Sync + fmt::Debug {
     async fn fetch(&self) -> Result<Vec<NewsItem>, PortError>;
 }
 
+/// A structured-output request to a language model (M5b).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LlmRequest {
+    /// Fixed instructions (kept byte-identical across calls so providers can cache them).
+    pub system: String,
+    /// The untrusted material, already wrapped and labelled as data by the caller.
+    pub user: String,
+    /// JSON Schema the answer must follow.
+    pub schema: serde_json::Value,
+    pub max_tokens: u32,
+}
+
+/// A model's answer: the raw JSON text (validated by the caller) and what it cost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LlmResponse {
+    pub text: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+/// A language model (Claude API, Ollama). Output is data to validate, never instructions:
+/// callers parse it against their schema and discard anything that does not conform.
+#[async_trait]
+pub trait LlmProvider: Send + Sync + fmt::Debug {
+    /// `claude`, `ollama`, …
+    fn name(&self) -> &str;
+    fn model(&self) -> &str;
+
+    /// One structured-output completion. A refusal or truncated answer is an error.
+    async fn complete(&self, request: &LlmRequest) -> Result<LlmResponse, PortError>;
+}
+
 /// Durable news items (M5a), kept with the journal.
 #[async_trait]
 pub trait NewsStore: Send + Sync + fmt::Debug {
@@ -133,6 +165,28 @@ pub trait NewsStore: Send + Sync + fmt::Debug {
 
     /// Item count and newest item per source.
     async fn news_stats(&self) -> Result<Vec<NewsSourceStats>, PortError>;
+
+    /// Newest items `tier` has not read yet under `prompt_version` (a failed attempt counts as
+    /// not read, so it is retried; a rejected answer counts as read), newest first.
+    async fn unextracted(
+        &self,
+        prompt_version: &str,
+        tier: &str,
+        limit: usize,
+    ) -> Result<Vec<NewsItem>, PortError>;
+
+    /// Record one extraction attempt (replacing an earlier one of the same item, prompt and tier).
+    async fn record_extraction(&self, extraction: &Extraction) -> Result<(), PortError>;
+
+    /// Every attempt for these items under `prompt_version`.
+    async fn extractions(
+        &self,
+        urls: &[String],
+        prompt_version: &str,
+    ) -> Result<Vec<Extraction>, PortError>;
+
+    /// Tokens spent per tier since `since`.
+    async fn token_usage(&self, since: DateTime<Utc>) -> Result<TokenUsage, PortError>;
 }
 
 /// Agents' shared knowledge and messages (ADR 0003), kept with the journal.

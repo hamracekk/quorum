@@ -45,6 +45,7 @@ trader-bus = { path = "crates/bus" }
 trader-core = { path = "crates/core" }
 trader-data = { path = "crates/data" }
 trader-news = { path = "crates/news" }
+trader-ai = { path = "crates/ai" }
 trader-journal = { path = "crates/journal" }
 trader-lab = { path = "crates/lab" }
 trader-mcp = { path = "crates/mcp" }
