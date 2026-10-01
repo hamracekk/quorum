@@ -285,6 +285,10 @@ pub struct NewFinding {
     /// Earlier finding this one replaces (the earlier one is kept, marked superseded).
     #[serde(default)]
     pub supersedes: Option<i64>,
+    /// How likely the author thinks evaluation will confirm the claim (0–1). Scored against
+    /// outcomes as a Brier score in the author's track record.
+    #[serde(default)]
+    pub confidence: Option<f64>,
 }
 
 impl NewFinding {
@@ -323,6 +327,12 @@ impl NewFinding {
         if self.supersedes.is_some_and(|id| id <= 0) {
             return err("supersedes must be a finding id");
         }
+        if self
+            .confidence
+            .is_some_and(|c| !(c.is_finite() && (0.0..=1.0).contains(&c)))
+        {
+            return err("confidence must be between 0 and 1");
+        }
         Ok(())
     }
 
@@ -351,6 +361,95 @@ pub struct Finding {
     pub supersedes: Option<i64>,
     /// Newer finding that replaced this one, if any.
     pub superseded_by: Option<i64>,
+    pub confidence: Option<f64>,
+    /// The latest evaluation or operator decision, if any.
+    pub verdict: Option<Verdict>,
+}
+
+/// The outcome of evaluating a finding (or an operator's decision about it).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Verdict {
+    pub evaluated_at: DateTime<Utc>,
+    /// Who triggered it: an agent id or `operator`. The result never depends on who asked.
+    pub by: String,
+    /// `signal_study_holdout`, `strategy_holdout`, or `operator`.
+    pub method: String,
+    /// The status the finding moved to: confirmed, rejected, testing (inconclusive), or any
+    /// status an operator chose.
+    pub outcome: FindingStatus,
+    /// One readable line: the numbers behind the outcome.
+    pub summary: String,
+    /// Named numbers the evaluation used (counts, returns, t-statistics, thresholds).
+    #[serde(default)]
+    pub metrics: BTreeMap<String, f64>,
+    /// Data the evaluation looked at.
+    #[serde(default)]
+    pub window: Option<(DateTime<Utc>, DateTime<Utc>)>,
+}
+
+/// How an agent's findings fared under evaluation.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct TrackRecord {
+    pub findings: usize,
+    pub confirmed: usize,
+    pub rejected: usize,
+    /// Evaluated but inconclusive (`testing`).
+    pub inconclusive: usize,
+    /// Not evaluated yet (`hypothesis`).
+    pub pending: usize,
+    pub retired: usize,
+    /// confirmed / (confirmed + rejected); `None` before any decisive evaluation.
+    pub hit_rate: Option<f64>,
+    /// Mean squared error of stated confidence against decisive outcomes (0 is perfect,
+    /// 0.25 is a coin flip); `None` when no decided finding carried a confidence.
+    pub brier: Option<f64>,
+    /// Decided findings with a confidence, i.e. how many the Brier score averages.
+    pub brier_n: usize,
+}
+
+impl TrackRecord {
+    pub fn of<'a>(findings: impl IntoIterator<Item = &'a Finding>) -> Self {
+        let mut record = Self::default();
+        let mut squared = 0.0;
+        for finding in findings {
+            record.findings += 1;
+            let decided = match finding.status {
+                FindingStatus::Confirmed => {
+                    record.confirmed += 1;
+                    Some(1.0)
+                }
+                FindingStatus::Rejected => {
+                    record.rejected += 1;
+                    Some(0.0)
+                }
+                FindingStatus::Testing => {
+                    record.inconclusive += 1;
+                    None
+                }
+                FindingStatus::Hypothesis => {
+                    record.pending += 1;
+                    None
+                }
+                FindingStatus::Retired => {
+                    record.retired += 1;
+                    None
+                }
+            };
+            if let (Some(outcome), Some(confidence)) = (decided, finding.confidence) {
+                let error = confidence - outcome;
+                squared = error.mul_add(error, squared);
+                record.brier_n += 1;
+            }
+        }
+        let decided = record.confirmed + record.rejected;
+        if decided > 0 {
+            record.hit_rate = Some(record.confirmed as f64 / decided as f64);
+        }
+        if record.brier_n > 0 {
+            record.brier = Some(squared / record.brier_n as f64);
+        }
+        record
+    }
 }
 
 /// Which findings to list. Newest first.
@@ -457,6 +556,7 @@ mod tests {
                 text: "signal_study 2y".into(),
             }],
             supersedes: None,
+            confidence: Some(0.6),
         }
     }
 
@@ -584,6 +684,61 @@ mod tests {
                 .validate("researcher")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn confidence_must_be_a_probability() {
+        for bad in [-0.1, 1.5, f64::NAN] {
+            let mut f = finding(FindingKind::Observation, None);
+            f.confidence = Some(bad);
+            assert!(f.validate().is_err(), "{bad}");
+        }
+    }
+
+    fn stored(status: FindingStatus, confidence: Option<f64>) -> Finding {
+        Finding {
+            id: 1,
+            agent: "researcher".into(),
+            role: "r".into(),
+            created_at: DateTime::from_timestamp(0, 0).expect("ts"),
+            updated_at: DateTime::from_timestamp(0, 0).expect("ts"),
+            kind: FindingKind::Observation,
+            instruments: vec![],
+            claim: "claim text".into(),
+            hypothesis: None,
+            evidence: vec![],
+            status,
+            supersedes: None,
+            superseded_by: None,
+            confidence,
+            verdict: None,
+        }
+    }
+
+    #[test]
+    fn track_records_count_outcomes_and_score_confidence() {
+        let findings = [
+            stored(FindingStatus::Confirmed, Some(0.8)),
+            stored(FindingStatus::Rejected, Some(0.6)),
+            stored(FindingStatus::Rejected, None),
+            stored(FindingStatus::Testing, Some(0.9)),
+            stored(FindingStatus::Hypothesis, None),
+            stored(FindingStatus::Retired, None),
+        ];
+        let record = TrackRecord::of(&findings);
+        assert_eq!(
+            (record.findings, record.confirmed, record.rejected),
+            (6, 1, 2)
+        );
+        assert_eq!(
+            (record.inconclusive, record.pending, record.retired),
+            (1, 1, 1)
+        );
+        assert!((record.hit_rate.expect("decided") - 1.0 / 3.0).abs() < 1e-12);
+        // (0.8 − 1)² = 0.04 and (0.6 − 0)² = 0.36 → mean 0.2; undecided ones don't count.
+        assert_eq!(record.brier_n, 2);
+        assert!((record.brier.expect("scored") - 0.2).abs() < 1e-12);
+        assert_eq!(TrackRecord::of(&[]).hit_rate, None);
     }
 
     #[test]

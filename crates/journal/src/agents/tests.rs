@@ -1,7 +1,7 @@
 use trader_core::InstrumentId;
 use trader_core::agents::{
     AgentControl, Evidence, FindingKind, FindingQuery, FindingStatus, Hypothesis, MessageQuery,
-    NewFinding, NewMessage, OPERATOR,
+    NewFinding, NewMessage, OPERATOR, Verdict,
 };
 use trader_core::signals::Signal;
 
@@ -33,6 +33,7 @@ fn edge(claim: &str) -> NewFinding {
             },
         ],
         supersedes: None,
+        confidence: None,
     }
 }
 
@@ -44,6 +45,7 @@ fn note(claim: &str) -> NewFinding {
         hypothesis: None,
         evidence: vec![],
         supersedes: None,
+        confidence: None,
     }
 }
 
@@ -277,6 +279,79 @@ async fn messages_thread_and_unread_tracking_per_reader() {
         .await
         .expect_err("unknown thread");
     assert!(matches!(err, PortError::Invalid(_)));
+}
+
+fn verdict(by: &str, outcome: FindingStatus, hour: i64) -> Verdict {
+    Verdict {
+        evaluated_at: at(hour),
+        by: by.into(),
+        method: "signal_study_holdout".into(),
+        outcome,
+        summary: "oos net +0.4%, t 3.4 over 41 events".into(),
+        metrics: std::iter::once(("t_stat".to_owned(), 3.4)).collect(),
+        window: Some((at(0), at(hour))),
+    }
+}
+
+#[tokio::test]
+async fn verdicts_move_findings_and_are_kept_in_history() {
+    let journal = SqliteJournal::in_memory().await.expect("journal");
+    let mut claim = edge("RSI oversold bounces on BTC within a day");
+    claim.confidence = Some(0.7);
+    let posted = journal
+        .post_finding("researcher", "r", &claim, at(1))
+        .await
+        .expect("post");
+    assert_eq!(posted.confidence, Some(0.7));
+    assert!(posted.verdict.is_none());
+
+    let confirmed = journal
+        .record_verdict(
+            posted.id,
+            &verdict("risk-reviewer", FindingStatus::Confirmed, 5),
+        )
+        .await
+        .expect("verdict");
+    assert_eq!(confirmed.status, FindingStatus::Confirmed);
+    assert_eq!(confirmed.updated_at, at(5));
+    assert_eq!(
+        confirmed.verdict,
+        Some(verdict("risk-reviewer", FindingStatus::Confirmed, 5))
+    );
+    assert_eq!(
+        journal.finding(posted.id).await.expect("get"),
+        Some(confirmed)
+    );
+
+    journal
+        .record_verdict(posted.id, &verdict(OPERATOR, FindingStatus::Retired, 6))
+        .await
+        .expect("operator retires");
+    let err = journal
+        .record_verdict(
+            posted.id,
+            &verdict("researcher", FindingStatus::Confirmed, 7),
+        )
+        .await
+        .expect_err("retired findings change only by the operator");
+    assert!(matches!(err, PortError::Invalid(_)), "{err}");
+    journal
+        .record_verdict(posted.id, &verdict(OPERATOR, FindingStatus::Hypothesis, 8))
+        .await
+        .expect("operator reopens");
+
+    let history: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM finding_evaluations")
+        .fetch_one(&journal.pool)
+        .await
+        .expect("count");
+    assert_eq!(history, 3, "every decision is kept");
+    assert!(
+        journal
+            .record_verdict(99, &verdict(OPERATOR, FindingStatus::Rejected, 9))
+            .await
+            .is_err()
+    );
+    assert_eq!(journal.finding(99).await.expect("get"), None);
 }
 
 #[tokio::test]

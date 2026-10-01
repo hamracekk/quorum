@@ -21,7 +21,7 @@ depends on no internal crate.
 | `strategy.rs` | `Strategy` trait: returns target exposure per instrument on each closed bar |
 | `strategies/` | `SmaCross`, `BuyAndHold`, `SignalFollower` (trade chosen signals, hold N bars), `PerInstrument` (one instance per instrument, equal weight), `Sma` |
 | `broker.rs` | `Broker` port (sync, non-blocking: `submit`/`cancel`, outcomes via `poll`), `PaperBroker` (fills market orders against the latest quote with fees + slippage), `Portfolio` (cash, positions, marks; order sizing with min notional; changed only by fills) |
-| `agents.rs` | ADR 0003 types: `NewFinding`/`Finding` (kind, claim, typed `Hypothesis`, `Evidence`, status, supersession), `NewMessage`/`AgentMessage`, `AgentControl`, agent-id rules and shape validation |
+| `agents.rs` | ADR 0003 types: `NewFinding`/`Finding` (kind, claim, typed `Hypothesis`, `Evidence`, confidence, status, supersession, latest `Verdict`), `TrackRecord` (hit rate, Brier), `NewMessage`/`AgentMessage`, `AgentControl`, agent-id rules and shape validation |
 | `order.rs` | `Order`, `OrderId`, `OrderStatus`, `ExecutionReport`, `OrderBook`: the order state machine, rejecting illegal transitions and overfills |
 | `risk.rs` | `RiskLimits`, `RiskManager`: per-instrument and gross exposure caps, daily-loss kill switch |
 | `backtest.rs` | `run` / `run_from` (warm-up) / `run_with_events`: merge series and feed the `Engine`; `BacktestConfig`, `BacktestResult` |

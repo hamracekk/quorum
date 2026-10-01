@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agents::{
     AgentControl, AgentMessage, Finding, FindingQuery, MessageQuery, NewFinding, NewMessage,
+    Verdict,
 };
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
@@ -125,6 +126,12 @@ pub trait AgentStore: Send + Sync + fmt::Debug {
 
     /// Findings matching `query`, newest first.
     async fn findings(&self, query: &FindingQuery) -> Result<Vec<Finding>, PortError>;
+
+    async fn finding(&self, id: i64) -> Result<Option<Finding>, PortError>;
+
+    /// Store `verdict` as the finding's latest (and in its history) and move the finding to
+    /// `verdict.outcome`. A retired finding only changes again by the operator's decision.
+    async fn record_verdict(&self, id: i64, verdict: &Verdict) -> Result<Finding, PortError>;
 
     async fn send_message(
         &self,
