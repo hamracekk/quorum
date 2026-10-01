@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'news'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'trader-news'
+  description: 'News ingestion: RSS/Atom feeds (incl. SEC EDGAR), sanitized into plain-text items'
+dependsOn:
+  - 'core'
