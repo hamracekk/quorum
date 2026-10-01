@@ -4,6 +4,7 @@
 //! The same `Strategy` trait is meant to drive both the backtester and (later) a
 //! live/paper executor, so a strategy that backtests is the strategy that trades.
 
+pub mod agents;
 pub mod backtest;
 pub mod broker;
 pub mod engine;
@@ -29,8 +30,8 @@ pub use instrument::{InstrumentError, InstrumentId, InstrumentKind, VenueId};
 pub use metrics::{Performance, Report};
 pub use order::{ExecutionReport, Order, OrderBook, OrderError, OrderId, OrderStatus};
 pub use ports::{
-    AgentCall, BarStore, EventLog, Journal, MarketData, MarketStream, Notification, Notifier,
-    PortError, RunInfo, RunKind, Severity, StreamedBar,
+    AgentCall, AgentStore, BarStore, EventLog, Journal, MarketData, MarketStream, Notification,
+    Notifier, PortError, RunInfo, RunKind, Severity, StreamedBar,
 };
 pub use strategy::Strategy;
 pub use types::{Bar, EquityPoint, Fill, Series, Side};

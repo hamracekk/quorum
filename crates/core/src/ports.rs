@@ -15,6 +15,9 @@ use chrono::{DateTime, Utc};
 use futures_core::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
+use crate::agents::{
+    AgentControl, AgentMessage, Finding, FindingQuery, MessageQuery, NewFinding, NewMessage,
+};
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
 use crate::order::Order;
@@ -103,6 +106,48 @@ pub trait EventLog: Send + Sync + fmt::Debug {
 
     /// Events with `start <= ts < end`, in sequence order.
     fn read(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<Envelope>, PortError>;
+}
+
+/// Agents' shared knowledge and messages (ADR 0003), kept with the journal.
+///
+/// Callers validate shapes first (`NewFinding::validate`, `NewMessage::validate`); the store
+/// enforces references: a superseded finding and a reply's thread must exist.
+#[async_trait]
+pub trait AgentStore: Send + Sync + fmt::Debug {
+    /// Store a finding by `agent` (in `role`) with status `hypothesis`.
+    async fn post_finding(
+        &self,
+        agent: &str,
+        role: &str,
+        finding: &NewFinding,
+        ts: DateTime<Utc>,
+    ) -> Result<Finding, PortError>;
+
+    /// Findings matching `query`, newest first.
+    async fn findings(&self, query: &FindingQuery) -> Result<Vec<Finding>, PortError>;
+
+    async fn send_message(
+        &self,
+        sender: &str,
+        message: &NewMessage,
+        ts: DateTime<Utc>,
+    ) -> Result<AgentMessage, PortError>;
+
+    /// Messages matching `query`: the newest `limit`, returned oldest first.
+    async fn messages(&self, query: &MessageQuery) -> Result<Vec<AgentMessage>, PortError>;
+
+    /// Messages to `reader` (or to everyone) it has not read yet, oldest first, and mark
+    /// them read. Its own messages are never unread.
+    async fn take_unread(&self, reader: &str, limit: usize)
+    -> Result<Vec<AgentMessage>, PortError>;
+
+    /// How many messages `reader` has not read yet.
+    async fn unread_count(&self, reader: &str) -> Result<usize, PortError>;
+
+    /// Set the runtime switch of one agent or of `*` (all agents).
+    async fn set_control(&self, control: &AgentControl) -> Result<(), PortError>;
+
+    async fn controls(&self) -> Result<Vec<AgentControl>, PortError>;
 }
 
 /// How urgent a notification is.

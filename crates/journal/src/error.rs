@@ -15,4 +15,7 @@ pub enum JournalError {
     },
     #[error("invalid stored value: {0}")]
     Corrupt(String),
+    /// A request that refers to something that does not exist (an unknown thread or finding).
+    #[error("{0}")]
+    Invalid(String),
 }
