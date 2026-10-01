@@ -23,6 +23,7 @@ The journal (ADR 0002): a SQLite record of **decisions and executions, grouped b
 | `risk_halts` | `run_id`, `ts`, `equity` |
 | `findings` (0004) | `id`, `agent`, `role`, `created_at`, `updated_at`, `kind`, `instruments` (JSON), `claim`, `hypothesis` (JSON), `evidence` (JSON), `status`, `verdict` (AG-2), `supersedes`; `findings_fts` (FTS5 over claims, insert trigger) |
 | `agent_messages` (0004) | `id`, `ts`, `thread` (first message id), `sender`, `recipient` (agent, `operator`, `all`), `body`, `refs` (JSON); `agent_message_reads` (`message_id`, `reader`, `read_at`) for per-reader unread |
+| `findings.confidence` · `finding_evaluations` (0005) | Author's probability (0–1) · every verdict: `finding_id`, `ts`, `by_whom`, `status`, `verdict` (JSON) |
 | `agent_controls` (0004) | `agent` (id or `*`), `enabled`, `reason`, `updated_at` — runtime switches |
 | `orders` (0003) | `run_id`, `order_id`, `instrument`, `side`, `qty`, `status`, `filled_qty`, `avg_price`, `fees`, `reason`, `created_at`, `updated_at` — one row per order, upserted by every `order` event so it holds the latest state |
 

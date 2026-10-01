@@ -8,7 +8,7 @@ use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 use trader_core::agents::{
     AgentControl, AgentMessage, EVERYONE, Finding, FindingQuery, FindingStatus, MessageQuery,
-    NewFinding, NewMessage,
+    NewFinding, NewMessage, OPERATOR, Verdict,
 };
 use trader_core::{AgentStore, PortError};
 
@@ -45,6 +45,11 @@ fn finding_from(row: &SqliteRow) -> Result<Finding, JournalError> {
             .map_err(|e: trader_core::agents::AgentError| JournalError::Corrupt(e.0))?,
         supersedes: row.try_get("supersedes")?,
         superseded_by: row.try_get("superseded_by")?,
+        confidence: row.try_get("confidence")?,
+        verdict: row
+            .try_get::<Option<String>, _>("verdict")?
+            .map(|v| from_json("verdict", &v))
+            .transpose()?,
     })
 }
 
@@ -82,7 +87,7 @@ impl SqliteJournal {
     async fn finding_by_id(&self, id: i64) -> Result<Option<Finding>, JournalError> {
         let row = sqlx::query(
             "SELECT f.id, f.agent, f.role, f.created_at, f.updated_at, f.kind, f.instruments, \
-             f.claim, f.hypothesis, f.evidence, f.status, f.supersedes, \
+             f.claim, f.hypothesis, f.evidence, f.status, f.supersedes, f.confidence, f.verdict, \
              (SELECT MIN(n.id) FROM findings n WHERE n.supersedes = f.id) AS superseded_by \
              FROM findings f WHERE f.id = ?",
         )
@@ -114,7 +119,8 @@ impl SqliteJournal {
         let stamp = format_ts(ts);
         let id: i64 = sqlx::query_scalar(
             "INSERT INTO findings (agent, role, created_at, updated_at, kind, instruments, claim, \
-             hypothesis, evidence, supersedes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+             hypothesis, evidence, supersedes, confidence) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(agent)
         .bind(role)
@@ -126,12 +132,52 @@ impl SqliteJournal {
         .bind(finding.hypothesis.as_ref().map(to_json).transpose()?)
         .bind(to_json(&finding.evidence)?)
         .bind(finding.supersedes)
+        .bind(finding.confidence)
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
         self.finding_by_id(id)
             .await?
             .ok_or_else(|| JournalError::Corrupt(format!("finding {id} vanished after insert")))
+    }
+
+    async fn store_verdict(&self, id: i64, verdict: &Verdict) -> Result<Finding, JournalError> {
+        let mut tx = self.pool.begin().await?;
+        let status: Option<String> = sqlx::query_scalar("SELECT status FROM findings WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let status =
+            status.ok_or_else(|| JournalError::Invalid(format!("finding {id} does not exist")))?;
+        if status == FindingStatus::Retired.as_str() && verdict.by != OPERATOR {
+            return Err(JournalError::Invalid(format!(
+                "finding {id} is retired; only the operator can change it"
+            )));
+        }
+        let text = to_json(verdict)?;
+        let stamp = format_ts(verdict.evaluated_at);
+        sqlx::query(
+            "INSERT INTO finding_evaluations (finding_id, ts, by_whom, status, verdict) \
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(&stamp)
+        .bind(&verdict.by)
+        .bind(verdict.outcome.as_str())
+        .bind(&text)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("UPDATE findings SET status = ?, verdict = ?, updated_at = ? WHERE id = ?")
+            .bind(verdict.outcome.as_str())
+            .bind(&text)
+            .bind(&stamp)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        self.finding_by_id(id)
+            .await?
+            .ok_or_else(|| JournalError::Corrupt(format!("finding {id} vanished")))
     }
 
     async fn select_findings(&self, query: &FindingQuery) -> Result<Vec<Finding>, JournalError> {
@@ -142,7 +188,7 @@ impl SqliteJournal {
             Some(Some(fts)) => {
                 sqlx::query(
                     "SELECT f.id, f.agent, f.role, f.created_at, f.updated_at, f.kind, \
-                     f.instruments, f.claim, f.hypothesis, f.evidence, f.status, f.supersedes, \
+                     f.instruments, f.claim, f.hypothesis, f.evidence, f.status, f.supersedes, f.confidence, f.verdict, \
                      (SELECT MIN(n.id) FROM findings n WHERE n.supersedes = f.id) AS superseded_by \
                      FROM findings f \
                      WHERE (?1 IS NULL OR f.agent = ?1) AND (?2 IS NULL OR f.status = ?2) \
@@ -159,7 +205,7 @@ impl SqliteJournal {
             None => {
                 sqlx::query(
                     "SELECT f.id, f.agent, f.role, f.created_at, f.updated_at, f.kind, \
-                     f.instruments, f.claim, f.hypothesis, f.evidence, f.status, f.supersedes, \
+                     f.instruments, f.claim, f.hypothesis, f.evidence, f.status, f.supersedes, f.confidence, f.verdict, \
                      (SELECT MIN(n.id) FROM findings n WHERE n.supersedes = f.id) AS superseded_by \
                      FROM findings f \
                      WHERE (?1 IS NULL OR f.agent = ?1) AND (?2 IS NULL OR f.status = ?2) \
@@ -358,6 +404,14 @@ impl AgentStore for SqliteJournal {
 
     async fn findings(&self, query: &FindingQuery) -> Result<Vec<Finding>, PortError> {
         self.select_findings(query).await.map_err(agent_port)
+    }
+
+    async fn finding(&self, id: i64) -> Result<Option<Finding>, PortError> {
+        self.finding_by_id(id).await.map_err(agent_port)
+    }
+
+    async fn record_verdict(&self, id: i64, verdict: &Verdict) -> Result<Finding, PortError> {
+        self.store_verdict(id, verdict).await.map_err(agent_port)
     }
 
     async fn send_message(
