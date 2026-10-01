@@ -2789,6 +2789,7 @@ dependencies = [
  "chrono",
  "clap",
  "csv",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
