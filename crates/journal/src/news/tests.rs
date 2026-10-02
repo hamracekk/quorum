@@ -253,3 +253,40 @@ async fn extractions_are_cached_per_prompt_and_tier_and_count_tokens() {
         TokenUsage::default()
     );
 }
+
+#[tokio::test]
+async fn readings_are_the_valid_relevant_attempts_since_a_time() {
+    let journal = SqliteJournal::in_memory().await.expect("journal");
+    journal
+        .store_news(&[
+            item("a", "coindesk", "Bitcoin ETF sees record inflows", 0),
+            item("b", "coindesk", "Solana upgrade ships", 1),
+            item("c", "decrypt", "Ether staking opinion piece", 2),
+        ])
+        .await
+        .expect("store");
+    let local = extraction("a", "local", ExtractionStatus::Ok, 500, 2);
+    let remote = extraction("a", "remote", ExtractionStatus::Ok, 900, 3);
+    let mut irrelevant = extraction("c", "local", ExtractionStatus::Ok, 300, 4);
+    irrelevant.relevant = false;
+    irrelevant.events.clear();
+    for attempt in [
+        local.clone(),
+        remote.clone(),
+        irrelevant,
+        extraction("b", "local", ExtractionStatus::Rejected, 400, 2),
+        extraction("b", "remote", ExtractionStatus::Failed, 0, 5),
+    ] {
+        journal.record_extraction(&attempt).await.expect("record");
+    }
+
+    assert_eq!(
+        journal.readings(at(0)).await.expect("readings"),
+        vec![local, remote.clone()],
+        "oldest first; rejected, failed and not-relevant attempts are left out"
+    );
+    assert_eq!(
+        journal.readings(at(3)).await.expect("readings"),
+        vec![remote]
+    );
+}
