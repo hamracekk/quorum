@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'hyperliquid'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'trader-hyperliquid'
+  description: 'Followed traders, read only: Hyperliquid public positions and fills'
+dependsOn:
+  - 'core'

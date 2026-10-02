@@ -24,6 +24,7 @@ use crate::instrument::{InstrumentId, VenueId};
 use crate::news::{Extraction, NewsItem, NewsQuery, NewsSourceStats, StoredNews, TokenUsage};
 use crate::order::Order;
 use crate::predictions::{PredictionMarket, ProbabilityPoint};
+use crate::traders::{TraderAccount, TraderFill};
 use crate::types::{Bar, Fill, Series};
 
 /// Error crossing a port boundary. Adapters keep their own detailed errors and wrap them.
@@ -138,6 +139,25 @@ pub trait PredictionSource: Send + Sync + fmt::Debug {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Result<Vec<ProbabilityPoint>, PortError>;
+}
+
+/// A venue with public accounts, read only (SRC-3): positions and fills of an address.
+/// Nothing here can place an order or sign anything.
+#[async_trait]
+pub trait TraderSource: Send + Sync + fmt::Debug {
+    /// Venue id, e.g. `hyperliquid`.
+    fn venue(&self) -> &str;
+
+    async fn account(&self, address: &str) -> Result<TraderAccount, PortError>;
+
+    /// Fills with `start <= ts <= end`, oldest first (venues may only keep the latest few
+    /// thousand).
+    async fn fills(
+        &self,
+        address: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<TraderFill>, PortError>;
 }
 
 /// A structured-output request to a language model (M5b).
