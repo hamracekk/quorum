@@ -9,6 +9,7 @@ mod agent_runs;
 mod agents;
 mod error;
 mod news;
+mod reports;
 
 pub use error::JournalError;
 

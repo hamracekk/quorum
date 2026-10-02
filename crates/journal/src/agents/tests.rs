@@ -434,3 +434,41 @@ async fn agent_runs_are_recorded_finished_and_counted_for_budgets() {
     let missing = AgentRun { id: 99, ..run };
     assert!(journal.finish_agent_run(&missing).await.is_err());
 }
+
+#[tokio::test]
+async fn reports_are_stored_with_their_facts_newest_first() {
+    let journal = SqliteJournal::in_memory().await.expect("journal");
+    let report = NewReport {
+        period_from: at(0),
+        period_to: at(168),
+        title: "Week 1".into(),
+        body: "Nothing traded; no source has an edge.".into(),
+        facts: serde_json::json!({"paper": null, "edges": []}),
+    };
+    let first = journal
+        .post_report("lead", &report, at(168))
+        .await
+        .expect("post");
+    journal
+        .post_report(
+            "lead",
+            &NewReport {
+                title: "Week 2".into(),
+                ..report
+            },
+            at(336),
+        )
+        .await
+        .expect("post");
+    let all = journal.reports(None, 10).await.expect("reports");
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].title, "Week 2", "newest first");
+    assert_eq!(all[1], first);
+    assert!(
+        journal
+            .reports(Some("other"), 10)
+            .await
+            .expect("reports")
+            .is_empty()
+    );
+}

@@ -549,6 +549,33 @@ pub struct AgentRun {
     pub error: Option<String>,
 }
 
+/// A report to the operator (AG-3c): the orchestrator's weekly post-mortem.
+///
+/// `facts` are computed by trader for the period (paper session, tournament, scoreboard, agents), so the numbers in a
+/// report never depend on what the agent wrote; `body` is the agent's reading of them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentReport {
+    pub id: i64,
+    pub agent: String,
+    pub created_at: DateTime<Utc>,
+    pub period_from: DateTime<Utc>,
+    pub period_to: DateTime<Utc>,
+    pub title: String,
+    /// Markdown by the agent.
+    pub body: String,
+    pub facts: serde_json::Value,
+}
+
+/// A report before it is stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewReport {
+    pub period_from: DateTime<Utc>,
+    pub period_to: DateTime<Utc>,
+    pub title: String,
+    pub body: String,
+    pub facts: serde_json::Value,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

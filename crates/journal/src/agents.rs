@@ -7,8 +7,8 @@ use serde::de::DeserializeOwned;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 use trader_core::agents::{
-    AgentControl, AgentMessage, AgentRun, EVERYONE, Finding, FindingQuery, FindingStatus,
-    MessageQuery, NewFinding, NewMessage, OPERATOR, Verdict,
+    AgentControl, AgentMessage, AgentReport, AgentRun, EVERYONE, Finding, FindingQuery,
+    FindingStatus, MessageQuery, NewFinding, NewMessage, NewReport, OPERATOR, Verdict,
 };
 use trader_core::{AgentStore, PortError};
 
@@ -481,6 +481,24 @@ impl AgentStore for SqliteJournal {
         self.sum_agent_tokens(agent, since)
             .await
             .map_err(agent_port)
+    }
+    async fn post_report(
+        &self,
+        agent: &str,
+        report: &NewReport,
+        ts: DateTime<Utc>,
+    ) -> Result<AgentReport, PortError> {
+        self.insert_report(agent, report, ts)
+            .await
+            .map_err(agent_port)
+    }
+
+    async fn reports(
+        &self,
+        agent: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AgentReport>, PortError> {
+        self.select_reports(agent, limit).await.map_err(agent_port)
     }
 }
 
