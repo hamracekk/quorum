@@ -13,6 +13,7 @@ loop here (M9).
 | `walk_forward.rs` | `walk_forward(...)`: rolling train/test windows, stitched out-of-sample `Report` |
 | `signals.rs` | Event study: bias-signed forward returns (next open → close h bars later) per signal, baseline, net of costs, t-stat, in-sample vs out-of-sample, verdict |
 | `scoreboard.rs` | Scoreboard: directional occurrences per source traded from the first open after they were known, at time horizons; mean, hit rate, net, t, IC (Spearman), pending outcomes, recent-window decay; baselines `always_long` and `random`; excess over the drift (`mean − bias × always-long mean`) and its t decide the verdict (edge / no_edge / collecting / too_few); a source's `since` keeps earlier occurrences (why it was picked) out of the record, reported as `in_sample` |
+| `tournament.rs` | Section 5 rules: `review(standings, rules)` → promote the best challenger that beat the champion's Sharpe without a worse drawdown on enough days and trades; retire one trailing buy & hold at consecutive reviews |
 | `error.rs` | `LabError`: empty grid, empty window, not enough data |
 
 ## How walk-forward works
