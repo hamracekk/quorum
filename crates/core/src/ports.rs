@@ -24,7 +24,7 @@ use crate::instrument::{InstrumentId, VenueId};
 use crate::news::{Extraction, NewsItem, NewsQuery, NewsSourceStats, StoredNews, TokenUsage};
 use crate::order::Order;
 use crate::predictions::{PredictionMarket, ProbabilityPoint};
-use crate::traders::{TraderAccount, TraderFill};
+use crate::traders::{LeaderboardEntry, TraderAccount, TraderFill};
 use crate::types::{Bar, Fill, Series};
 
 /// Error crossing a port boundary. Adapters keep their own detailed errors and wrap them.
@@ -158,6 +158,14 @@ pub trait TraderSource: Send + Sync + fmt::Debug {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Result<Vec<TraderFill>, PortError>;
+
+    /// The venue's public leaderboard, if it has one.
+    async fn leaderboard(&self) -> Result<Vec<LeaderboardEntry>, PortError> {
+        Err(PortError::Invalid(format!(
+            "{} has no leaderboard",
+            self.venue()
+        )))
+    }
 }
 
 /// A structured-output request to a language model (M5b).

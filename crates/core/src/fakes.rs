@@ -18,7 +18,7 @@ use crate::ports::{
     Notification, Notifier, PortError, PredictionSource, StreamedBar, TraderSource,
 };
 use crate::predictions::{PredictionMarket, ProbabilityPoint};
-use crate::traders::{TraderAccount, TraderFill};
+use crate::traders::{LeaderboardEntry, TraderAccount, TraderFill};
 use crate::types::{Bar, Series};
 
 /// A recorded `MarketData::bars` call: instrument, start, end.
@@ -424,6 +424,8 @@ impl PredictionSource for MemoryPredictions {
 #[derive(Debug, Default)]
 pub struct MemoryTraders {
     accounts: BTreeMap<String, (TraderAccount, Vec<TraderFill>)>,
+    leaderboard: Vec<LeaderboardEntry>,
+    leaderboard_reads: Mutex<usize>,
 }
 
 impl MemoryTraders {
@@ -432,6 +434,20 @@ impl MemoryTraders {
         self.accounts
             .insert(account.address.clone(), (account, fills));
         self
+    }
+
+    #[must_use]
+    pub fn with_leaderboard(mut self, rows: Vec<LeaderboardEntry>) -> Self {
+        self.leaderboard = rows;
+        self
+    }
+
+    /// How often the leaderboard was downloaded.
+    pub fn leaderboard_reads(&self) -> usize {
+        *self
+            .leaderboard_reads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -463,6 +479,14 @@ impl TraderSource for MemoryTraders {
             .filter(|f| f.ts >= start && f.ts <= end)
             .cloned()
             .collect())
+    }
+
+    async fn leaderboard(&self) -> Result<Vec<LeaderboardEntry>, PortError> {
+        *self
+            .leaderboard_reads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) += 1;
+        Ok(self.leaderboard.clone())
     }
 }
 

@@ -63,6 +63,7 @@ fn news(occurrences: Vec<Occurrence>) -> Source {
     Source {
         id: "news".into(),
         kind: SourceKind::News,
+        since: None,
         occurrences,
     }
 }
@@ -241,4 +242,22 @@ fn riding_the_trend_is_not_an_edge() {
     assert!((one.bias - 1.0).abs() < f64::EPSILON);
     assert!(one.excess.abs() < 1e-3, "{one:?}");
     assert_eq!(row.verdict, Verdict::NoEdge, "{one:?}");
+}
+
+#[test]
+fn calls_before_a_source_was_chosen_are_in_sample_and_kept_out_of_the_record() {
+    let data = series(&[100.0, 110.0, 121.0, 100.0, 100.0, 100.0]);
+    let mut source = news(vec![call(at(0), 1.0, 1.0), call(at(2), -1.0, 1.0)]);
+    source.since = Some(at(1));
+    let board = score(&[source], &[data], &config(at(5)));
+    let row = &board.rows[0];
+    assert_eq!(row.occurrences, 1, "only the call after it was chosen");
+    assert_eq!(row.since, Some(at(1)));
+    let before = row.in_sample.as_ref().expect("in-sample");
+    assert_eq!(before.count, 1);
+    assert!((before.mean_return - 0.1).abs() < 1e-12, "{before:?}");
+    assert!(
+        row.horizons[0].mean_return > 0.0,
+        "the bearish call after: 121 → 100"
+    );
 }

@@ -119,3 +119,29 @@ async fn rate_limits_are_retried_with_backoff() {
     let source = HyperliquidSource::with_url(&server.uri()).expect("client");
     assert!(source.account(ADDRESS).await.is_ok());
 }
+
+#[tokio::test]
+async fn the_leaderboard_reads_windows_and_skips_bad_rows() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "leaderboardRows": [
+            { "ethAddress": ADDRESS, "accountValue": "500000.5", "displayName": "whale\u{0007}",
+              "windowPerformances": [
+                ["day", { "pnl": "10", "roi": "0.001", "vlm": "1000" }],
+                ["week", { "pnl": "100", "roi": "0.01", "vlm": "50000" }],
+                ["month", { "pnl": "1000", "roi": "0.1", "vlm": "200000" }],
+                ["allTime", { "pnl": "5000", "roi": "0.5", "vlm": "900000" }]
+              ], "prize": 0 },
+            { "ethAddress": "not-an-address", "accountValue": "1", "windowPerformances": [], "displayName": null }
+        ]})))
+        .mount(&server)
+        .await;
+    let source = HyperliquidSource::with_url(&server.uri())
+        .expect("client")
+        .with_leaderboard(&format!("{}/leaderboard", server.uri()));
+    let rows = source.leaderboard().await.expect("leaderboard");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].display_name.as_deref(), Some("whale"));
+    assert!((rows[0].month.roi - 0.1).abs() < 1e-12);
+    assert!((rows[0].all_time.volume - 900_000.0).abs() < 1e-6);
+}
