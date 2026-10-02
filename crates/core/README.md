@@ -19,7 +19,8 @@ depends on no internal crate.
 | `patterns.rs` | 13 candlestick patterns with bias; `detect_at` uses only bars up to `i` |
 | `signals.rs` | `Signal` (patterns + 8 indicator events), `SignalDetector` (streaming, fires on crossings), `occurrences` |
 | `strategy.rs` | `Strategy` trait: returns target exposure per instrument on each closed bar |
-| `strategies/` | `SmaCross`, `BuyAndHold`, `SignalFollower` (trade chosen signals, hold N bars), `PerInstrument` (one instance per instrument, equal weight), `Sma` |
+| `strategy.rs` | `Strategy` (`on_bar`; optional `explain` → recorded with the signal, `inform` for live `ExternalCall`s), `ExternalCall` |
+| `strategies/` | `SmaCross`, `BuyAndHold`, `SignalFollower` (trade chosen signals, hold N bars), `PerInstrument` (one instance per instrument, equal weight), `Sma`, `Ensemble` (M8: technical signals + `ExternalCall`s weighted by walk-forward evidence — independent outcomes, excess over drift, Bonferroni-raised t, net of costs; volatility-targeted, covariance-scaled sizing; every target explained) |
 | `broker.rs` | `Broker` port (sync, non-blocking: `submit`/`cancel`, outcomes via `poll`), `PaperBroker` (fills market orders against the latest quote with fees + slippage), `Portfolio` (cash, positions, marks; order sizing with min notional; changed only by fills) |
 | `agents.rs` | ADR 0003 types: `NewFinding`/`Finding` (kind, claim, typed `Hypothesis`, `Evidence`, confidence, status, supersession, latest `Verdict`), `TrackRecord` (hit rate, Brier), `NewMessage`/`AgentMessage`, `AgentControl`, agent-id rules and shape validation |
 | `news.rs` | `NewsItem`, `NewsQuery`, `StoredNews`, `NewsSourceStats`, `title_key`, `DUPLICATE_WINDOW_HOURS`; M5b: `NewsEvent` (direction, magnitude, confidence, horizon, event type), `Extraction`, `TokenUsage` |

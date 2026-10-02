@@ -21,8 +21,8 @@ use sqlx::Row;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use trader_core::{
-    AgentCall, Event, Fill, InstrumentId, Journal, Order, OrderId, OrderStatus, PortError, RunInfo,
-    RunKind, Side,
+    AgentCall, Decision, Event, Fill, InstrumentId, Journal, Order, OrderId, OrderStatus,
+    PortError, RunInfo, RunKind, Side,
 };
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -131,15 +131,17 @@ impl SqliteJournal {
                     instrument,
                     strategy,
                     target,
+                    reason,
                 } => sqlx::query(
-                    "INSERT INTO signals (run_id, ts, instrument, strategy, target) \
-                     VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO signals (run_id, ts, instrument, strategy, target, reason) \
+                     VALUES (?, ?, ?, ?, ?, ?)",
                 )
                 .bind(run_id)
                 .bind(format_ts(*ts))
                 .bind(instrument.to_string())
                 .bind(strategy.as_str())
-                .bind(*target),
+                .bind(*target)
+                .bind(reason.as_ref().map(serde_json::Value::to_string)),
                 Event::Target {
                     ts,
                     instrument,
@@ -221,6 +223,39 @@ impl SqliteJournal {
                         .map_err(|e| JournalError::Corrupt(e.to_string()))?,
                     label: row.try_get("label")?,
                     started_at: parse_ts(&started_at)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn select_decisions(
+        &self,
+        run_id: &str,
+        max: usize,
+    ) -> Result<Vec<Decision>, JournalError> {
+        let rows = sqlx::query(
+            "SELECT ts, instrument, strategy, target, reason FROM signals WHERE run_id = ? \
+             ORDER BY id DESC LIMIT ?",
+        )
+        .bind(run_id)
+        .bind(i64::try_from(max).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                let ts: String = row.try_get("ts")?;
+                let instrument: String = row.try_get("instrument")?;
+                let reason: Option<String> = row.try_get("reason")?;
+                Ok(Decision {
+                    ts: parse_ts(&ts)?,
+                    instrument: InstrumentId::from_str(&instrument)
+                        .map_err(|e| JournalError::Corrupt(e.to_string()))?,
+                    strategy: row.try_get("strategy")?,
+                    target: row.try_get("target")?,
+                    reason: reason
+                        .map(|r| serde_json::from_str(&r))
+                        .transpose()
+                        .map_err(|e| JournalError::Corrupt(format!("signal reason: {e}")))?,
                 })
             })
             .collect()
@@ -352,6 +387,10 @@ impl Journal for SqliteJournal {
         self.select_runs().await.map_err(port)
     }
 
+    async fn decisions(&self, run_id: &str, limit: usize) -> Result<Vec<Decision>, PortError> {
+        self.select_decisions(run_id, limit).await.map_err(port)
+    }
+
     async fn fills(&self, run_id: &str) -> Result<Vec<Fill>, PortError> {
         self.select_fills(run_id).await.map_err(port)
     }
@@ -444,6 +483,7 @@ mod tests {
                 instrument: btc(),
                 strategy: "sma-cross".into(),
                 target: 1.0,
+                reason: None,
             },
             Event::Target {
                 ts: at(0),
@@ -481,6 +521,37 @@ mod tests {
         assert_eq!(count(&journal, "SELECT COUNT(*) FROM signals").await, 1);
         assert_eq!(count(&journal, "SELECT COUNT(*) FROM targets").await, 1);
         assert_eq!(count(&journal, "SELECT COUNT(*) FROM risk_halts").await, 1);
+    }
+
+    #[tokio::test]
+    async fn decisions_come_back_newest_first_with_their_reasons() {
+        let journal = SqliteJournal::in_memory().await.expect("journal");
+        journal.start_run(&run("r1", 0)).await.expect("start run");
+        let signal = |hour: i64, target: f64, reason: Option<serde_json::Value>| Event::Signal {
+            ts: at(hour),
+            instrument: btc(),
+            strategy: "ensemble".into(),
+            target,
+            reason,
+        };
+        let why =
+            serde_json::json!({ "conviction": 0.4, "contributors": [{ "source": "news:final" }] });
+        journal
+            .record(
+                "r1",
+                &[signal(0, 0.0, None), signal(1, 0.25, Some(why.clone()))],
+            )
+            .await
+            .expect("record");
+        let decisions = journal.decisions("r1", 10).await.expect("decisions");
+        assert_eq!(decisions.len(), 2);
+        assert_eq!(decisions[0].ts, at(1));
+        assert_eq!(decisions[0].reason, Some(why));
+        assert_eq!(decisions[1].reason, None);
+        assert_eq!(
+            journal.decisions("r1", 1).await.expect("decisions").len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -603,6 +674,7 @@ mod tests {
                 instrument: btc(),
                 strategy: "s".into(),
                 target: 1.0,
+                reason: None,
             },
             // NaN is stored as NULL by SQLite and violates NOT NULL: the batch must roll back.
             Event::Target {

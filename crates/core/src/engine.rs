@@ -188,10 +188,16 @@ impl<'s> Engine<'s> {
                     instrument: instrument.clone(),
                     strategy: self.strategy.name().to_owned(),
                     target,
+                    reason: self.strategy.explain(instrument),
                 });
             }
         }
         Ok(out)
+    }
+
+    /// Pass external calls (live news readings, …) to the strategy.
+    pub fn inform(&mut self, calls: &[crate::strategy::ExternalCall]) {
+        self.strategy.inform(calls);
     }
 
     /// Current state: cash, equity, positions valued at their latest marks, pending targets.
