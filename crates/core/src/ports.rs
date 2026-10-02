@@ -23,6 +23,7 @@ use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
 use crate::news::{Extraction, NewsItem, NewsQuery, NewsSourceStats, StoredNews, TokenUsage};
 use crate::order::Order;
+use crate::predictions::{PredictionMarket, ProbabilityPoint};
 use crate::types::{Bar, Fill, Series};
 
 /// Error crossing a port boundary. Adapters keep their own detailed errors and wrap them.
@@ -119,6 +120,24 @@ pub trait NewsSource: Send + Sync + fmt::Debug {
 
     /// The feed's current items, sanitized, without instrument tags. `fetched_at` is now.
     async fn fetch(&self) -> Result<Vec<NewsItem>, PortError>;
+}
+
+/// A prediction-market exchange, read only (SRC-2): market state and probability history.
+/// Questions are untrusted text; nothing here can place an order.
+#[async_trait]
+pub trait PredictionSource: Send + Sync + fmt::Debug {
+    /// Exchange id, e.g. `kalshi`.
+    fn venue(&self) -> &str;
+
+    async fn market(&self, ticker: &str) -> Result<PredictionMarket, PortError>;
+
+    /// Hourly implied probabilities with `start <= ts <= end`, oldest first.
+    async fn history(
+        &self,
+        ticker: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<ProbabilityPoint>, PortError>;
 }
 
 /// A structured-output request to a language model (M5b).

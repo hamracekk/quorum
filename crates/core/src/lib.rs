@@ -17,6 +17,7 @@ pub mod news;
 pub mod order;
 pub mod patterns;
 pub mod ports;
+pub mod predictions;
 pub mod risk;
 pub mod signals;
 pub mod strategies;
@@ -32,8 +33,8 @@ pub use metrics::{Performance, Report};
 pub use order::{ExecutionReport, Order, OrderBook, OrderError, OrderId, OrderStatus};
 pub use ports::{
     AgentCall, AgentStore, BarStore, EventLog, Journal, LlmProvider, LlmRequest, LlmResponse,
-    MarketData, MarketStream, NewsSource, NewsStore, Notification, Notifier, PortError, RunInfo,
-    RunKind, Severity, StreamedBar,
+    MarketData, MarketStream, NewsSource, NewsStore, Notification, Notifier, PortError,
+    PredictionSource, RunInfo, RunKind, Severity, StreamedBar,
 };
 pub use strategy::Strategy;
 pub use types::{Bar, EquityPoint, Fill, Series, Side};

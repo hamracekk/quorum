@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'predictions'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'trader-predictions'
+  description: 'Prediction markets, read only: Kalshi market state and probability history'
+dependsOn:
+  - 'core'

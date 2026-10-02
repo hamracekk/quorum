@@ -53,6 +53,8 @@ pub struct Occurrence {
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
     News,
+    /// Prediction-market probability moves (SRC-2).
+    Prediction,
     Technical,
     Baseline,
 }
