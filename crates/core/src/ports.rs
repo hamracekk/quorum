@@ -16,8 +16,8 @@ use futures_core::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
 use crate::agents::{
-    AgentControl, AgentMessage, AgentRun, Finding, FindingQuery, MessageQuery, NewFinding,
-    NewMessage, Verdict,
+    AgentControl, AgentMessage, AgentReport, AgentRun, Finding, FindingQuery, MessageQuery,
+    NewFinding, NewMessage, NewReport, Verdict,
 };
 use crate::chat::{ChatReply, ChatRequest};
 use crate::events::{Envelope, Event};
@@ -329,6 +329,21 @@ pub trait AgentStore: Send + Sync + fmt::Debug {
 
     /// Tokens (input + output) an agent's runs used since `since` (for its daily budget).
     async fn agent_tokens(&self, agent: &str, since: DateTime<Utc>) -> Result<u64, PortError>;
+
+    /// Store a report by `agent`.
+    async fn post_report(
+        &self,
+        agent: &str,
+        report: &NewReport,
+        ts: DateTime<Utc>,
+    ) -> Result<AgentReport, PortError>;
+
+    /// The latest reports, newest first, optionally of one agent.
+    async fn reports(
+        &self,
+        agent: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AgentReport>, PortError>;
 }
 
 /// How urgent a notification is.
