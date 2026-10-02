@@ -12,11 +12,17 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use trader_core::traders::{TraderAccount, TraderFill, TraderPosition};
+use trader_core::traders::{
+    LeaderboardEntry, TraderAccount, TraderFill, TraderPosition, WindowStats,
+};
 use trader_core::{PortError, TraderSource};
 
 /// Public info endpoint.
 pub const HYPERLIQUID_INFO: &str = "https://api.hyperliquid.xyz/info";
+/// Public leaderboard (one large JSON document, ~40 MB).
+pub const HYPERLIQUID_LEADERBOARD: &str = "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard";
+/// Largest leaderboard accepted.
+pub const MAX_LEADERBOARD_BYTES: usize = 128 * 1024 * 1024;
 /// Largest response accepted.
 pub const MAX_BYTES: usize = 10 * 1024 * 1024;
 /// Fills per request (the API's page size) and pages read at most (it keeps ~10k per account).
@@ -78,6 +84,7 @@ pub fn opens(dir: &str) -> Option<f64> {
 #[derive(Debug, Clone)]
 pub struct HyperliquidSource {
     url: String,
+    leaderboard_url: String,
     client: reqwest::Client,
 }
 
@@ -120,6 +127,28 @@ struct Leverage {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Leaderboard {
+    leaderboard_rows: Vec<LeaderboardRow>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LeaderboardRow {
+    eth_address: String,
+    account_value: String,
+    window_performances: Vec<(String, RawWindow)>,
+    display_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawWindow {
+    pnl: String,
+    roi: String,
+    vlm: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct Fill {
     coin: String,
     px: String,
@@ -149,8 +178,76 @@ impl HyperliquidSource {
             })?;
         Ok(Self {
             url: url.to_owned(),
+            leaderboard_url: HYPERLIQUID_LEADERBOARD.to_owned(),
             client,
         })
+    }
+
+    /// Read the leaderboard from another address (a test server).
+    #[must_use]
+    pub fn with_leaderboard(mut self, url: &str) -> Self {
+        url.clone_into(&mut self.leaderboard_url);
+        self
+    }
+
+    async fn fetch_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, HyperliquidError> {
+        let url = self.leaderboard_url.clone();
+        let http = |source| HyperliquidError::Http {
+            url: url.clone(),
+            source,
+        };
+        let response = self
+            .client
+            .get(&url)
+            .timeout(Duration::from_mins(2))
+            .send()
+            .await
+            .map_err(http)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(HyperliquidError::Status {
+                url,
+                status: status.as_u16(),
+            });
+        }
+        let bytes = response.bytes().await.map_err(http)?;
+        if bytes.len() > MAX_LEADERBOARD_BYTES {
+            return Err(HyperliquidError::TooLarge { url });
+        }
+        let board: Leaderboard =
+            serde_json::from_slice(&bytes).map_err(|e| HyperliquidError::Shape {
+                url: url.clone(),
+                message: e.to_string(),
+            })?;
+        Ok(board
+            .leaderboard_rows
+            .into_iter()
+            .filter_map(|row| {
+                let address = address(&row.eth_address).ok()?;
+                let window = |name: &str| {
+                    row.window_performances
+                        .iter()
+                        .find(|(w, _)| w == name)
+                        .map(|(_, s)| WindowStats {
+                            pnl: number(&s.pnl).unwrap_or(0.0),
+                            roi: number(&s.roi).unwrap_or(0.0),
+                            volume: number(&s.vlm).unwrap_or(0.0),
+                        })
+                        .unwrap_or_default()
+                };
+                Some(LeaderboardEntry {
+                    account_value: number(&row.account_value)?,
+                    display_name: row
+                        .display_name
+                        .map(|n| n.chars().filter(|c| !c.is_control()).take(40).collect()),
+                    day: window("day"),
+                    week: window("week"),
+                    month: window("month"),
+                    all_time: window("allTime"),
+                    address,
+                })
+            })
+            .collect())
     }
 
     async fn info<T: DeserializeOwned>(&self, body: &Value) -> Result<T, HyperliquidError> {
@@ -274,6 +371,10 @@ impl TraderSource for HyperliquidSource {
         }
         fills.sort_by_key(|f| f.ts);
         Ok(fills)
+    }
+
+    async fn leaderboard(&self) -> Result<Vec<LeaderboardEntry>, PortError> {
+        Ok(self.fetch_leaderboard().await?)
     }
 }
 

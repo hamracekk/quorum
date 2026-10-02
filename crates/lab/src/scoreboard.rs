@@ -66,6 +66,10 @@ pub struct Source {
     pub id: String,
     pub kind: SourceKind,
     pub occurrences: Vec<Occurrence>,
+    /// When the source was chosen. Occurrences before it are in-sample (the reason it was
+    /// picked, e.g. a leaderboard record) and only reported; the record and the verdict use
+    /// the occurrences from then on (survivorship-aware).
+    pub since: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +149,10 @@ pub struct SourceScore {
     /// Primary horizon over occurrences in the recent window only.
     pub recent: HorizonScore,
     pub verdict: Verdict,
+    /// See [`Source::since`].
+    pub since: Option<DateTime<Utc>>,
+    /// Primary horizon over the occurrences before `since` (not part of the verdict).
+    pub in_sample: Option<HorizonScore>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -196,6 +204,7 @@ pub fn technical_sources(
         .map(|signal| Source {
             id: signal.to_string(),
             kind: SourceKind::Technical,
+            since: None,
             occurrences: by_signal.remove(&signal).unwrap_or_default(),
         })
         .collect()
@@ -223,11 +232,13 @@ pub fn baselines(series: &[Series], start: DateTime<Utc>) -> Vec<Source> {
         Source {
             id: ALWAYS_LONG.into(),
             kind: SourceKind::Baseline,
+            since: None,
             occurrences: long,
         },
         Source {
             id: "random".into(),
             kind: SourceKind::Baseline,
+            since: None,
             occurrences: random,
         },
     ]
@@ -282,6 +293,48 @@ fn source_score(
     bars: &BTreeMap<&InstrumentId, &[Bar]>,
     cfg: &ScoreConfig,
 ) -> SourceScore {
+    let Some(since) = source.since else {
+        return record(source, bars, cfg);
+    };
+    let (before, after): (Vec<Occurrence>, Vec<Occurrence>) = source
+        .occurrences
+        .iter()
+        .cloned()
+        .partition(|o| o.ts < since);
+    let earlier = Source {
+        occurrences: before,
+        since: None,
+        ..source.clone()
+    };
+    let primary = cfg
+        .horizons
+        .iter()
+        .find(|h| h.label == cfg.primary)
+        .map_or_else(Duration::zero, |h| h.length);
+    let in_sample = horizon_score(
+        &cfg.primary,
+        &outcomes(&earlier, bars, primary),
+        earlier.occurrences.len(),
+        cfg.cost,
+    );
+    let mut score = record(
+        &Source {
+            occurrences: after,
+            ..source.clone()
+        },
+        bars,
+        cfg,
+    );
+    score.since = Some(since);
+    score.in_sample = Some(in_sample);
+    score
+}
+
+fn record(
+    source: &Source,
+    bars: &BTreeMap<&InstrumentId, &[Bar]>,
+    cfg: &ScoreConfig,
+) -> SourceScore {
     let per_horizon: Vec<Outcomes> = cfg
         .horizons
         .iter()
@@ -325,6 +378,8 @@ fn source_score(
         horizons,
         recent: horizon_score(&cfg.primary, &recent, recent_total, cfg.cost),
         verdict: Verdict::TooFew,
+        since: None,
+        in_sample: None,
     }
 }
 

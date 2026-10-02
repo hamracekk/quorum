@@ -115,6 +115,91 @@ pub fn calls(fills: &[TraderFill], rule: CallRule) -> Vec<TraderCall> {
     found
 }
 
+/// Performance over one window of a public leaderboard.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, serde::Deserialize)]
+pub struct WindowStats {
+    pub pnl: f64,
+    pub roi: f64,
+    pub volume: f64,
+}
+
+/// A venue's public leaderboard row: a candidate to follow, picked *because* of this record
+/// (so it proves nothing about the future; see `Source::since` in the lab).
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+pub struct LeaderboardEntry {
+    pub address: String,
+    pub display_name: Option<String>,
+    pub account_value: f64,
+    pub day: WindowStats,
+    pub week: WindowStats,
+    pub month: WindowStats,
+    pub all_time: WindowStats,
+}
+
+/// One followed trader's call on an instrument (the input of [`consensus`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FollowedCall {
+    pub trader: String,
+    /// The instrument, as text.
+    pub instrument: String,
+    pub ts: DateTime<Utc>,
+    pub direction: f64,
+}
+
+/// Followed traders agreeing: at `ts`, `traders` distinct traders called `instrument` in
+/// `direction` within the window.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Consensus {
+    pub instrument: String,
+    pub ts: DateTime<Utc>,
+    pub direction: f64,
+    pub traders: usize,
+}
+
+/// The flow signal: followed traders agreeing on an instrument, oldest first.
+///
+/// At each call, count the distinct traders who called the same instrument in the same
+/// direction within the preceding `window` (this call included); `min_traders` or more is a
+/// consensus call, then none for that instrument and direction for `cooldown`. Uses only calls
+/// up to the one judged (no look-ahead).
+pub fn consensus(
+    calls: &[FollowedCall],
+    min_traders: usize,
+    window: Duration,
+    cooldown: Duration,
+) -> Vec<Consensus> {
+    let mut sorted: Vec<&FollowedCall> = calls.iter().collect();
+    sorted.sort_by_key(|c| c.ts);
+    let mut last: BTreeMap<(String, bool), DateTime<Utc>> = BTreeMap::new();
+    let mut found = Vec::new();
+    for (i, call) in sorted.iter().enumerate() {
+        let long = call.direction > 0.0;
+        let agreeing: std::collections::BTreeSet<&str> = sorted
+            .get(..=i)
+            .unwrap_or_default()
+            .iter()
+            .filter(|c| {
+                c.instrument == call.instrument
+                    && (c.direction > 0.0) == long
+                    && call.ts - c.ts < window
+            })
+            .map(|c| c.trader.as_str())
+            .collect();
+        let key = (call.instrument.clone(), long);
+        let cooled = last.get(&key).is_none_or(|t| call.ts - *t >= cooldown);
+        if agreeing.len() >= min_traders.max(1) && cooled {
+            found.push(Consensus {
+                instrument: call.instrument.clone(),
+                ts: call.ts,
+                direction: if long { 1.0 } else { -1.0 },
+                traders: agreeing.len(),
+            });
+            last.insert(key, call.ts);
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +244,30 @@ mod tests {
             .collect();
         assert_eq!(summary, [(at(60), "BTC", 1.0), (at(300), "BTC", -1.0)]);
         assert!((found[0].notional - 12_000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn consensus_needs_distinct_traders_agreeing_within_the_window() {
+        let call = |trader: &str, minutes: i64, direction: f64| FollowedCall {
+            trader: trader.into(),
+            instrument: "binance:BTCUSDT".into(),
+            ts: at(minutes),
+            direction,
+        };
+        let day = Duration::hours(24);
+        let calls = [
+            call("a", 0, 1.0),
+            call("a", 60, 1.0),    // the same trader again: still one
+            call("b", 120, -1.0),  // disagrees
+            call("c", 180, 1.0),   // a + c long within 24h → consensus at 180
+            call("d", 240, 1.0),   // within the cooldown → none
+            call("a", 3_000, 1.0), // a, alone again after the window
+        ];
+        let found = consensus(&calls, 2, day, day);
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].ts, found[0].traders), (at(180), 2));
+        assert!(found[0].direction > 0.0);
+        assert_eq!(consensus(&calls, 4, day, day).len(), 0);
     }
 
     #[test]

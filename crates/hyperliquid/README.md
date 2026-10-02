@@ -8,6 +8,9 @@ Followed traders, read only (SRC-3): Hyperliquid behind the `TraderSource` port.
   about the latest 10k fills per account). `opens` marks fills that open or flip into a position:
   `Open Long`/`Short > Long` → long, `Open Short`/`Long > Short` → short; closes, settlements and
   spot trades are not calls.
+- **Leaderboard** (`stats-data.hyperliquid.xyz/Mainnet/leaderboard`, ~40 MB, up to 128 MB
+  accepted): address, display name (sanitised), account value, day/week/month/all-time PnL, ROI and
+  volume; rows with a bad address are skipped.
 - **Public API, no key:** nothing is signed or sent; trader cannot trade on Hyperliquid.
 - **Rate limits:** the info API weighs requests (fills pages are heavy); a 429 is retried after 2 s
   and 4 s.
