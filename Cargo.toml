@@ -49,6 +49,7 @@ trader-core = { path = "crates/core" }
 trader-data = { path = "crates/data" }
 trader-news = { path = "crates/news" }
 trader-predictions = { path = "crates/predictions" }
+trader-hyperliquid = { path = "crates/hyperliquid" }
 trader-ai = { path = "crates/ai" }
 trader-journal = { path = "crates/journal" }
 trader-lab = { path = "crates/lab" }

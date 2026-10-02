@@ -55,6 +55,8 @@ pub enum SourceKind {
     News,
     /// Prediction-market probability moves (SRC-2).
     Prediction,
+    /// Followed traders' opening fills (SRC-3).
+    Trader,
     Technical,
     Baseline,
 }

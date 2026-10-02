@@ -22,6 +22,7 @@ pub mod risk;
 pub mod signals;
 pub mod strategies;
 pub mod strategy;
+pub mod traders;
 pub mod types;
 
 pub use backtest::{BacktestConfig, BacktestResult, run, run_from, run_with_events};
@@ -34,7 +35,7 @@ pub use order::{ExecutionReport, Order, OrderBook, OrderError, OrderId, OrderSta
 pub use ports::{
     AgentCall, AgentStore, BarStore, EventLog, Journal, LlmProvider, LlmRequest, LlmResponse,
     MarketData, MarketStream, NewsSource, NewsStore, Notification, Notifier, PortError,
-    PredictionSource, RunInfo, RunKind, Severity, StreamedBar,
+    PredictionSource, RunInfo, RunKind, Severity, StreamedBar, TraderSource,
 };
 pub use strategy::Strategy;
 pub use types::{Bar, EquityPoint, Fill, Series, Side};

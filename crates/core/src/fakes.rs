@@ -15,9 +15,10 @@ use crate::instrument::{InstrumentId, VenueId};
 use crate::news::NewsItem;
 use crate::ports::{
     BarStore, EventLog, LlmProvider, LlmRequest, LlmResponse, MarketData, MarketStream, NewsSource,
-    Notification, Notifier, PortError, PredictionSource, StreamedBar,
+    Notification, Notifier, PortError, PredictionSource, StreamedBar, TraderSource,
 };
 use crate::predictions::{PredictionMarket, ProbabilityPoint};
+use crate::traders::{TraderAccount, TraderFill};
 use crate::types::{Bar, Series};
 
 /// A recorded `MarketData::bars` call: instrument, start, end.
@@ -415,6 +416,52 @@ impl PredictionSource for MemoryPredictions {
             .iter()
             .filter(|p| p.ts >= start && p.ts <= end)
             .copied()
+            .collect())
+    }
+}
+
+/// A venue with public accounts in memory: accounts with their fills.
+#[derive(Debug, Default)]
+pub struct MemoryTraders {
+    accounts: BTreeMap<String, (TraderAccount, Vec<TraderFill>)>,
+}
+
+impl MemoryTraders {
+    #[must_use]
+    pub fn with_account(mut self, account: TraderAccount, fills: Vec<TraderFill>) -> Self {
+        self.accounts
+            .insert(account.address.clone(), (account, fills));
+        self
+    }
+}
+
+#[async_trait]
+impl TraderSource for MemoryTraders {
+    fn venue(&self) -> &'static str {
+        "hyperliquid"
+    }
+
+    async fn account(&self, address: &str) -> Result<TraderAccount, PortError> {
+        self.accounts
+            .get(address)
+            .map(|(account, _)| account.clone())
+            .ok_or_else(|| PortError::Invalid(format!("no account `{address}`")))
+    }
+
+    async fn fills(
+        &self,
+        address: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<TraderFill>, PortError> {
+        let (_, fills) = self
+            .accounts
+            .get(address)
+            .ok_or_else(|| PortError::Invalid(format!("no account `{address}`")))?;
+        Ok(fills
+            .iter()
+            .filter(|f| f.ts >= start && f.ts <= end)
+            .cloned()
             .collect())
     }
 }
