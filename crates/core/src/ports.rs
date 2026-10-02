@@ -123,6 +123,16 @@ pub trait NewsSource: Send + Sync + fmt::Debug {
     async fn fetch(&self) -> Result<Vec<NewsItem>, PortError>;
 }
 
+/// A strategy decision as journaled: a changed target and why.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Decision {
+    pub ts: DateTime<Utc>,
+    pub instrument: InstrumentId,
+    pub strategy: String,
+    pub target: f64,
+    pub reason: Option<serde_json::Value>,
+}
+
 /// A prediction-market exchange, read only (SRC-2): market state and probability history.
 /// Questions are untrusted text; nothing here can place an order.
 #[async_trait]
@@ -399,6 +409,10 @@ pub trait Journal: Send + Sync + fmt::Debug {
 
     /// Orders of `run_id` in their latest state, by id.
     async fn orders(&self, run_id: &str) -> Result<Vec<Order>, PortError>;
+
+    /// The latest `limit` strategy decisions (signals) of `run_id`, newest first, with the
+    /// reasons strategies gave (M8).
+    async fn decisions(&self, run_id: &str, limit: usize) -> Result<Vec<Decision>, PortError>;
 
     /// Audit one agent tool call.
     async fn record_agent_call(&self, call: &AgentCall) -> Result<(), PortError>;

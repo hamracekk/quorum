@@ -25,6 +25,9 @@ pub enum Event {
         instrument: InstrumentId,
         strategy: String,
         target: f64,
+        /// Why (M8 ensembles: contributing sources and their weights); absent otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<serde_json::Value>,
     },
     /// A risk-adjusted target queued for execution at the instrument's next bar open.
     Target {
@@ -109,6 +112,7 @@ mod tests {
                 instrument: id(),
                 strategy: "sma-cross".into(),
                 target: 1.0,
+                reason: None,
             },
             Event::Target {
                 ts: at(3),
