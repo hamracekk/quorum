@@ -15,8 +15,9 @@ use crate::instrument::{InstrumentId, VenueId};
 use crate::news::NewsItem;
 use crate::ports::{
     BarStore, EventLog, LlmProvider, LlmRequest, LlmResponse, MarketData, MarketStream, NewsSource,
-    Notification, Notifier, PortError, StreamedBar,
+    Notification, Notifier, PortError, PredictionSource, StreamedBar,
 };
+use crate::predictions::{PredictionMarket, ProbabilityPoint};
 use crate::types::{Bar, Series};
 
 /// A recorded `MarketData::bars` call: instrument, start, end.
@@ -369,6 +370,52 @@ impl Notifier for MemoryNotifier {
             .unwrap_or_else(PoisonError::into_inner)
             .push(notification.clone());
         Ok(())
+    }
+}
+
+/// A prediction-market exchange in memory: markets with their probability history.
+#[derive(Debug, Default)]
+pub struct MemoryPredictions {
+    markets: BTreeMap<String, (PredictionMarket, Vec<ProbabilityPoint>)>,
+}
+
+impl MemoryPredictions {
+    #[must_use]
+    pub fn with_market(mut self, market: PredictionMarket, history: Vec<ProbabilityPoint>) -> Self {
+        self.markets
+            .insert(market.ticker.clone(), (market, history));
+        self
+    }
+}
+
+#[async_trait]
+impl PredictionSource for MemoryPredictions {
+    fn venue(&self) -> &'static str {
+        "kalshi"
+    }
+
+    async fn market(&self, ticker: &str) -> Result<PredictionMarket, PortError> {
+        self.markets
+            .get(ticker)
+            .map(|(market, _)| market.clone())
+            .ok_or_else(|| PortError::Invalid(format!("no market `{ticker}`")))
+    }
+
+    async fn history(
+        &self,
+        ticker: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<ProbabilityPoint>, PortError> {
+        let (_, history) = self
+            .markets
+            .get(ticker)
+            .ok_or_else(|| PortError::Invalid(format!("no market `{ticker}`")))?;
+        Ok(history
+            .iter()
+            .filter(|p| p.ts >= start && p.ts <= end)
+            .copied()
+            .collect())
     }
 }
 

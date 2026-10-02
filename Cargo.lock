@@ -5237,6 +5237,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "trader-predictions"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "trader-core",
+ "wiremock",
+]
+
+[[package]]
 name = "trader-server"
 version = "0.1.0"
 dependencies = [
@@ -5276,6 +5291,7 @@ dependencies = [
  "trader-journal",
  "trader-lab",
  "trader-news",
+ "trader-predictions",
  "uuid",
 ]
 
