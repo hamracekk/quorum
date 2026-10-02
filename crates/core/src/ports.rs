@@ -187,6 +187,10 @@ pub trait NewsStore: Send + Sync + fmt::Debug {
 
     /// Tokens spent per tier since `since`.
     async fn token_usage(&self, since: DateTime<Utc>) -> Result<TokenUsage, PortError>;
+
+    /// Valid readings (`ok`, relevant) recorded since `since`, every prompt version and tier,
+    /// oldest first: what the scoreboard scores.
+    async fn readings(&self, since: DateTime<Utc>) -> Result<Vec<Extraction>, PortError>;
 }
 
 /// Agents' shared knowledge and messages (ADR 0003), kept with the journal.

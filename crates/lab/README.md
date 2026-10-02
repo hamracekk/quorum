@@ -12,6 +12,7 @@ loop here (M9).
 | `sweep.rs` | `sweep(grid, factory, series, cfg)`: backtest every parameter set, sorted by Sharpe |
 | `walk_forward.rs` | `walk_forward(...)`: rolling train/test windows, stitched out-of-sample `Report` |
 | `signals.rs` | Event study: bias-signed forward returns (next open → close h bars later) per signal, baseline, net of costs, t-stat, in-sample vs out-of-sample, verdict |
+| `scoreboard.rs` | Scoreboard: directional occurrences per source traded from the first open after they were known, at time horizons; mean, hit rate, net, t, IC (Spearman), pending outcomes, recent-window decay; baselines `always_long` and `random`; excess over the drift (`mean − bias × always-long mean`) and its t decide the verdict (edge / no_edge / collecting / too_few) |
 | `error.rs` | `LabError`: empty grid, empty window, not enough data |
 
 ## How walk-forward works

@@ -139,6 +139,18 @@ impl SqliteJournal {
         rows.iter().map(extraction_from).collect()
     }
 
+    async fn select_readings(&self, since: DateTime<Utc>) -> Result<Vec<Extraction>, JournalError> {
+        let rows = sqlx::query(
+            "SELECT url, prompt_version, tier, model, ts, status, relevant, events, error, \
+             input_tokens, output_tokens FROM news_extractions \
+             WHERE status = 'ok' AND relevant = 1 AND ts >= ? ORDER BY ts, url, tier",
+        )
+        .bind(format_ts(since))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(extraction_from).collect()
+    }
+
     async fn select_token_usage(&self, since: DateTime<Utc>) -> Result<TokenUsage, JournalError> {
         let rows = sqlx::query(
             "SELECT tier, SUM(input_tokens + output_tokens) AS spent, \
@@ -314,6 +326,10 @@ impl NewsStore for SqliteJournal {
 
     async fn token_usage(&self, since: DateTime<Utc>) -> Result<TokenUsage, PortError> {
         self.select_token_usage(since).await.map_err(port)
+    }
+
+    async fn readings(&self, since: DateTime<Utc>) -> Result<Vec<Extraction>, PortError> {
+        self.select_readings(since).await.map_err(port)
     }
 }
 
