@@ -390,3 +390,47 @@ fn fts_queries_quote_every_word() {
     assert_eq!(fts_query("\"* OR"), Some("\"OR\"".into()));
     assert_eq!(fts_query(" ** "), None);
 }
+
+#[tokio::test]
+async fn agent_runs_are_recorded_finished_and_counted_for_budgets() {
+    let journal = SqliteJournal::in_memory().await.expect("journal");
+    let mut run = journal
+        .start_agent_run("scout", "watch whales", "manual", at(0))
+        .await
+        .expect("start");
+    assert_eq!(run.status, "running");
+    run.status = "done".into();
+    run.finished_at = Some(at(1));
+    run.steps = 4;
+    run.input_tokens = 3_000;
+    run.output_tokens = 500;
+    run.summary = Some("two traders opened BTC longs".into());
+    journal.finish_agent_run(&run).await.expect("finish");
+    journal
+        .start_agent_run("news", "read news", "schedule", at(2))
+        .await
+        .expect("start");
+
+    let runs = journal.agent_runs(None, 10).await.expect("runs");
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0].agent, "news", "newest first");
+    assert_eq!(runs[1], run);
+    assert_eq!(
+        journal
+            .agent_runs(Some("scout"), 10)
+            .await
+            .expect("runs")
+            .len(),
+        1
+    );
+    assert_eq!(
+        journal.agent_tokens("scout", at(0)).await.expect("tokens"),
+        3_500
+    );
+    assert_eq!(
+        journal.agent_tokens("scout", at(1)).await.expect("tokens"),
+        0
+    );
+    let missing = AgentRun { id: 99, ..run };
+    assert!(journal.finish_agent_run(&missing).await.is_err());
+}

@@ -7,8 +7,8 @@ use serde::de::DeserializeOwned;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 use trader_core::agents::{
-    AgentControl, AgentMessage, EVERYONE, Finding, FindingQuery, FindingStatus, MessageQuery,
-    NewFinding, NewMessage, OPERATOR, Verdict,
+    AgentControl, AgentMessage, AgentRun, EVERYONE, Finding, FindingQuery, FindingStatus,
+    MessageQuery, NewFinding, NewMessage, OPERATOR, Verdict,
 };
 use trader_core::{AgentStore, PortError};
 
@@ -449,6 +449,38 @@ impl AgentStore for SqliteJournal {
 
     async fn controls(&self) -> Result<Vec<AgentControl>, PortError> {
         self.select_controls().await.map_err(agent_port)
+    }
+
+    async fn start_agent_run(
+        &self,
+        agent: &str,
+        task: &str,
+        trigger: &str,
+        ts: DateTime<Utc>,
+    ) -> Result<AgentRun, PortError> {
+        self.insert_agent_run(agent, task, trigger, ts)
+            .await
+            .map_err(agent_port)
+    }
+
+    async fn finish_agent_run(&self, run: &AgentRun) -> Result<(), PortError> {
+        self.update_agent_run(run).await.map_err(agent_port)
+    }
+
+    async fn agent_runs(
+        &self,
+        agent: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AgentRun>, PortError> {
+        self.select_agent_runs(agent, limit)
+            .await
+            .map_err(agent_port)
+    }
+
+    async fn agent_tokens(&self, agent: &str, since: DateTime<Utc>) -> Result<u64, PortError> {
+        self.sum_agent_tokens(agent, since)
+            .await
+            .map_err(agent_port)
     }
 }
 

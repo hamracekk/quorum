@@ -10,12 +10,13 @@ use chrono::{DateTime, Utc};
 use futures_core::Stream;
 use futures_core::stream::BoxStream;
 
+use crate::chat::{ChatReply, ChatRequest};
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
 use crate::news::NewsItem;
 use crate::ports::{
-    BarStore, EventLog, LlmProvider, LlmRequest, LlmResponse, MarketData, MarketStream, NewsSource,
-    Notification, Notifier, PortError, PredictionSource, StreamedBar, TraderSource,
+    BarStore, ChatModel, EventLog, LlmProvider, LlmRequest, LlmResponse, MarketData, MarketStream,
+    NewsSource, Notification, Notifier, PortError, PredictionSource, StreamedBar, TraderSource,
 };
 use crate::predictions::{PredictionMarket, ProbabilityPoint};
 use crate::traders::{LeaderboardEntry, TraderAccount, TraderFill};
@@ -487,6 +488,52 @@ impl TraderSource for MemoryTraders {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) += 1;
         Ok(self.leaderboard.clone())
+    }
+}
+
+/// A chat model that plays back scripted replies, recording every request it got.
+#[derive(Debug, Default)]
+pub struct ScriptedChat {
+    replies: Mutex<VecDeque<ChatReply>>,
+    requests: Mutex<Vec<ChatRequest>>,
+}
+
+impl ScriptedChat {
+    pub fn new(replies: Vec<ChatReply>) -> Self {
+        Self {
+            replies: Mutex::new(replies.into()),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn requests(&self) -> Vec<ChatRequest> {
+        self.requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[async_trait]
+impl ChatModel for ScriptedChat {
+    fn name(&self) -> &'static str {
+        "scripted"
+    }
+
+    fn model(&self) -> &'static str {
+        "script"
+    }
+
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatReply, PortError> {
+        self.requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(request.clone());
+        self.replies
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop_front()
+            .ok_or_else(|| PortError::Invalid("the script ran out of replies".into()))
     }
 }
 

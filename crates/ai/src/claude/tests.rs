@@ -3,6 +3,7 @@ use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
+use trader_core::chat::{ChatMessage, ToolSpec};
 
 fn request() -> LlmRequest {
     LlmRequest {
@@ -161,4 +162,105 @@ fn the_key_never_appears_in_debug_output() {
     let debug = format!("{claude:?}");
     assert!(!debug.contains("sk-secret-value"), "{debug}");
     assert!(debug.contains("<redacted>"));
+}
+
+fn chat_request() -> ChatRequest {
+    ChatRequest {
+        system: "agent instructions".into(),
+        messages: vec![
+            ChatMessage::user_text("check the market"),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![
+                    ChatBlock::Opaque {
+                        raw: json!({ "type": "thinking", "thinking": "", "signature": "keep-me" }),
+                    },
+                    ChatBlock::ToolUse {
+                        id: "toolu_1".into(),
+                        name: "market_overview".into(),
+                        input: json!({}),
+                    },
+                ],
+            },
+            ChatMessage {
+                role: ChatRole::User,
+                content: vec![ChatBlock::ToolResult {
+                    tool_use_id: "toolu_1".into(),
+                    content: "{\"btc\": 1}".into(),
+                    is_error: false,
+                }],
+            },
+        ],
+        tools: vec![ToolSpec {
+            name: "market_overview".into(),
+            description: "prices".into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }],
+        max_tokens: 4_096,
+    }
+}
+
+#[tokio::test]
+async fn tool_use_steps_send_tools_history_and_reasoning_back_verbatim() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .and(body_partial_json(json!({
+            "tools": [{ "name": "market_overview", "description": "prices" }],
+            "system": [{ "cache_control": { "type": "ephemeral" } }],
+            "messages": [
+                { "role": "user", "content": [{ "type": "text", "text": "check the market" }] },
+                { "role": "assistant", "content": [
+                    { "type": "thinking", "signature": "keep-me" },
+                    { "type": "tool_use", "id": "toolu_1", "name": "market_overview" }
+                ]},
+                { "role": "user", "content": [
+                    { "type": "tool_result", "tool_use_id": "toolu_1", "is_error": false }
+                ]}
+            ],
+            "output_config": { "effort": "low" }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "content": [
+                { "type": "thinking", "thinking": "", "signature": "next" },
+                { "type": "text", "text": "Let me look at signals." },
+                { "type": "tool_use", "id": "toolu_2", "name": "signal_study", "input": { "days": 90 } }
+            ],
+            "stop_reason": "tool_use",
+            "usage": { "input_tokens": 50, "output_tokens": 30,
+                       "cache_creation_input_tokens": 0, "cache_read_input_tokens": 400 }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let reply = provider(&server, false)
+        .chat(&chat_request())
+        .await
+        .expect("reply");
+    assert_eq!(reply.stop, StopReason::ToolUse);
+    assert_eq!(reply.text(), "Let me look at signals.");
+    assert_eq!(
+        reply.tool_uses(),
+        [("toolu_2", "signal_study", &json!({ "days": 90 }))]
+    );
+    assert!(matches!(&reply.content[0], ChatBlock::Opaque { raw } if raw["signature"] == "next"));
+    assert_eq!((reply.input_tokens, reply.output_tokens), (450, 30));
+}
+
+#[tokio::test]
+async fn a_refused_step_is_an_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "content": [], "stop_reason": "refusal",
+            "stop_details": { "category": "cyber" },
+            "usage": { "input_tokens": 1, "output_tokens": 0 }
+        })))
+        .mount(&server)
+        .await;
+    let err = provider(&server, false)
+        .chat(&chat_request())
+        .await
+        .expect_err("refused");
+    assert!(err.to_string().contains("refusal"), "{err}");
 }
