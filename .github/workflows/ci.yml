@@ -15,6 +15,11 @@ jobs:
       - uses: actions/checkout@v4
       # Installs the toolchain pinned in rust-toolchain.toml (with rustfmt + clippy).
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      # The desktop app (crates/app, Tauri 2) links the system webview: WebKitGTK on Linux.
+      - name: Desktop app system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
       - name: Format
         run: cargo fmt-check
       - name: Clippy

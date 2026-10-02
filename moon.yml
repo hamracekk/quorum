@@ -44,6 +44,9 @@ tasks:
       - 'cli:fmt'
       - 'cli:lint'
       - 'cli:test'
+      - 'app:fmt'
+      - 'app:lint'
+      - 'app:test'
     options:
       cache: false
       runInCI: false

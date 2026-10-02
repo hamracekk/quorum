@@ -29,6 +29,9 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 thiserror = "2"
 # Backup archives (gzip-compressed tar, pure Rust backend).
 tar = "0.4"
+# Desktop shell (M4): a native window around the local dashboard server.
+tauri = { version = "2.12", default-features = false, features = ["wry", "common-controls-v6", "x11"] }
+tauri-build = { version = "2.7", default-features = false }
 # News feeds: RSS 0.x/1.0/2.0, Atom and JSON Feed.
 feed-rs = "3"
 flate2 = "1"
