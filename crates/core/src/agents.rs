@@ -529,6 +529,26 @@ pub struct AgentControl {
     pub updated_at: DateTime<Utc>,
 }
 
+/// One run of an internal agent (AG-3b): what it was asked, what it cost, how it ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentRun {
+    pub id: i64,
+    pub agent: String,
+    pub task: String,
+    /// `manual` (operator), `schedule`, or the id of the agent that asked (orchestrator).
+    pub trigger: String,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    /// `running`, `done`, `stopped` (budget or step limit), `failed`.
+    pub status: String,
+    pub steps: u32,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    /// The agent's closing text.
+    pub summary: Option<String>,
+    pub error: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

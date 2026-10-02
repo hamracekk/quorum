@@ -17,7 +17,8 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use trader_core::PortError;
-use trader_core::ports::{LlmProvider, LlmRequest, LlmResponse};
+use trader_core::chat::{ChatBlock, ChatReply, ChatRequest, ChatRole, StopReason};
+use trader_core::ports::{ChatModel, LlmProvider, LlmRequest, LlmResponse};
 
 pub const DEFAULT_URL: &str = "https://api.anthropic.com";
 const VERSION: &str = "2023-06-01";
@@ -155,7 +156,45 @@ impl ClaudeProvider {
         body
     }
 
+    /// The request body of one tool-using step (AG-3b).
+    fn chat_body(&self, request: &ChatRequest) -> Value {
+        let messages: Vec<Value> = request
+            .messages
+            .iter()
+            .map(|m| {
+                json!({
+                    "role": match m.role { ChatRole::User => "user", ChatRole::Assistant => "assistant" },
+                    "content": m.content.iter().map(block_json).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        let tools: Vec<Value> = request
+            .tools
+            .iter()
+            .map(|t| json!({ "name": t.name, "description": t.description, "input_schema": t.input_schema }))
+            .collect();
+        let mut body = json!({
+            "model": self.model,
+            "max_tokens": request.max_tokens,
+            // Tools and system come first in the prompt: marking the system block caches both.
+            "system": [{ "type": "text", "text": request.system, "cache_control": { "type": "ephemeral" } }],
+            "messages": messages,
+            "tools": tools,
+            "output_config": { "effort": self.effort },
+        });
+        if self.fallbacks
+            && let Some(object) = body.as_object_mut()
+        {
+            object.insert("fallbacks".into(), json!("default"));
+        }
+        body
+    }
+
     async fn send(&self, body: &Value) -> Result<Message, ClaudeError> {
+        self.post(body).await
+    }
+
+    async fn post<T: serde::de::DeserializeOwned>(&self, body: &Value) -> Result<T, ClaudeError> {
         let mut attempt = 0;
         loop {
             attempt += 1;
@@ -180,7 +219,7 @@ impl ClaudeProvider {
             let status = response.status();
             if status.is_success() {
                 return response
-                    .json::<Message>()
+                    .json::<T>()
                     .await
                     .map_err(|e| ClaudeError::Shape(e.to_string()));
             }
@@ -201,6 +240,87 @@ impl ClaudeProvider {
             });
         }
     }
+}
+
+/// One conversation block as the Messages API expects it.
+fn block_json(block: &ChatBlock) -> Value {
+    match block {
+        ChatBlock::Text { text } => json!({ "type": "text", "text": text }),
+        ChatBlock::ToolUse { id, name, input } => {
+            json!({ "type": "tool_use", "id": id, "name": name, "input": input })
+        }
+        ChatBlock::ToolResult {
+            tool_use_id,
+            content,
+            is_error,
+        } => json!({
+            "type": "tool_result", "tool_use_id": tool_use_id, "content": content,
+            "is_error": is_error,
+        }),
+        ChatBlock::Opaque { raw } => raw.clone(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatResponse {
+    content: Vec<Value>,
+    stop_reason: Option<String>,
+    stop_details: Option<StopDetails>,
+    usage: Usage,
+}
+
+/// A response block: text and tool calls are typed; reasoning and anything else is kept
+/// verbatim (it must be sent back unchanged in the next step).
+fn parse_block(raw: Value) -> Result<ChatBlock, ClaudeError> {
+    match raw.get("type").and_then(Value::as_str) {
+        Some("text") => Ok(ChatBlock::Text {
+            text: raw
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        }),
+        Some("tool_use") => {
+            let field = |name: &str| {
+                raw.get(name)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .ok_or_else(|| ClaudeError::Shape(format!("tool_use without {name}")))
+            };
+            Ok(ChatBlock::ToolUse {
+                id: field("id")?,
+                name: field("name")?,
+                input: raw.get("input").cloned().unwrap_or_else(|| json!({})),
+            })
+        }
+        _ => Ok(ChatBlock::Opaque { raw }),
+    }
+}
+
+fn chat_reply(response: ChatResponse) -> Result<ChatReply, ClaudeError> {
+    let stop = match response.stop_reason.as_deref() {
+        Some("refusal") => {
+            return Err(ClaudeError::Refusal(
+                response.stop_details.and_then(|d| d.category),
+            ));
+        }
+        Some("tool_use") => StopReason::ToolUse,
+        Some("max_tokens") => StopReason::MaxTokens,
+        _ => StopReason::EndTurn,
+    };
+    let usage = response.usage;
+    Ok(ChatReply {
+        content: response
+            .content
+            .into_iter()
+            .map(parse_block)
+            .collect::<Result<_, _>>()?,
+        stop,
+        input_tokens: usage.input_tokens
+            + usage.cache_creation_input_tokens
+            + usage.cache_read_input_tokens,
+        output_tokens: usage.output_tokens,
+    })
 }
 
 fn retryable(status: StatusCode) -> bool {
@@ -269,6 +389,25 @@ impl LlmProvider for ClaudeProvider {
             .await
             .map_err(|e| PortError::adapter("claude", e))?;
         answer(message).map_err(|e| PortError::adapter("claude", e))
+    }
+}
+
+#[async_trait]
+impl ChatModel for ClaudeProvider {
+    fn name(&self) -> &'static str {
+        "claude"
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatReply, PortError> {
+        let response: ChatResponse = self
+            .post(&self.chat_body(request))
+            .await
+            .map_err(|e| PortError::adapter("claude", e))?;
+        chat_reply(response).map_err(|e| PortError::adapter("claude", e))
     }
 }
 

@@ -5079,6 +5079,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "trader-agents"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trader-core",
+ "trader-data",
+ "trader-mcp",
+ "trader-service",
+]
+
+[[package]]
 name = "trader-ai"
 version = "0.1.0"
 dependencies = [
@@ -5133,6 +5149,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trader-agents",
  "trader-core",
  "trader-data",
  "trader-lab",
@@ -5279,6 +5296,7 @@ dependencies = [
  "tower",
  "tower-http 0.7.1",
  "tracing",
+ "trader-agents",
  "trader-core",
  "trader-data",
  "trader-service",

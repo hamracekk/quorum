@@ -16,9 +16,10 @@ use futures_core::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
 use crate::agents::{
-    AgentControl, AgentMessage, Finding, FindingQuery, MessageQuery, NewFinding, NewMessage,
-    Verdict,
+    AgentControl, AgentMessage, AgentRun, Finding, FindingQuery, MessageQuery, NewFinding,
+    NewMessage, Verdict,
 };
+use crate::chat::{ChatReply, ChatRequest};
 use crate::events::{Envelope, Event};
 use crate::instrument::{InstrumentId, VenueId};
 use crate::news::{Extraction, NewsItem, NewsQuery, NewsSourceStats, StoredNews, TokenUsage};
@@ -210,6 +211,16 @@ pub trait LlmProvider: Send + Sync + fmt::Debug {
     async fn complete(&self, request: &LlmRequest) -> Result<LlmResponse, PortError>;
 }
 
+/// A model that can hold a tool-using conversation (AG-3b): one step per call.
+#[async_trait]
+pub trait ChatModel: Send + Sync + fmt::Debug {
+    fn name(&self) -> &str;
+    fn model(&self) -> &str;
+
+    /// The next assistant turn. A refusal is an error.
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatReply, PortError>;
+}
+
 /// Durable news items (M5a), kept with the journal.
 #[async_trait]
 pub trait NewsStore: Send + Sync + fmt::Debug {
@@ -296,6 +307,28 @@ pub trait AgentStore: Send + Sync + fmt::Debug {
     async fn set_control(&self, control: &AgentControl) -> Result<(), PortError>;
 
     async fn controls(&self) -> Result<Vec<AgentControl>, PortError>;
+
+    /// Start recording a run of an internal agent (status `running`).
+    async fn start_agent_run(
+        &self,
+        agent: &str,
+        task: &str,
+        trigger: &str,
+        ts: DateTime<Utc>,
+    ) -> Result<AgentRun, PortError>;
+
+    /// Close a run with its outcome.
+    async fn finish_agent_run(&self, run: &AgentRun) -> Result<(), PortError>;
+
+    /// The latest runs, newest first, optionally of one agent.
+    async fn agent_runs(
+        &self,
+        agent: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AgentRun>, PortError>;
+
+    /// Tokens (input + output) an agent's runs used since `since` (for its daily budget).
+    async fn agent_tokens(&self, agent: &str, since: DateTime<Utc>) -> Result<u64, PortError>;
 }
 
 /// How urgent a notification is.

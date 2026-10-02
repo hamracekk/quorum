@@ -7,6 +7,7 @@
 pub mod agents;
 pub mod backtest;
 pub mod broker;
+pub mod chat;
 pub mod engine;
 pub mod events;
 pub mod fakes;
@@ -33,9 +34,9 @@ pub use instrument::{InstrumentError, InstrumentId, InstrumentKind, VenueId};
 pub use metrics::{Performance, Report};
 pub use order::{ExecutionReport, Order, OrderBook, OrderError, OrderId, OrderStatus};
 pub use ports::{
-    AgentCall, AgentStore, BarStore, Decision, EventLog, Journal, LlmProvider, LlmRequest,
-    LlmResponse, MarketData, MarketStream, NewsSource, NewsStore, Notification, Notifier,
-    PortError, PredictionSource, RunInfo, RunKind, Severity, StreamedBar, TraderSource,
+    AgentCall, AgentStore, BarStore, ChatModel, Decision, EventLog, Journal, LlmProvider,
+    LlmRequest, LlmResponse, MarketData, MarketStream, NewsSource, NewsStore, Notification,
+    Notifier, PortError, PredictionSource, RunInfo, RunKind, Severity, StreamedBar, TraderSource,
 };
 pub use strategy::{ExternalCall, Strategy};
 pub use types::{Bar, EquityPoint, Fill, Series, Side};
