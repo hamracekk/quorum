@@ -26,6 +26,7 @@ depends on no internal crate.
 | `news.rs` | `NewsItem`, `NewsQuery`, `StoredNews`, `NewsSourceStats`, `title_key`, `DUPLICATE_WINDOW_HOURS`; M5b: `NewsEvent` (direction, magnitude, confidence, horizon, event type), `Extraction`, `TokenUsage` |
 | `order.rs` | `Order`, `OrderId`, `OrderStatus`, `ExecutionReport`, `OrderBook`: the order state machine, rejecting illegal transitions and overfills |
 | `risk.rs` | `RiskLimits`, `RiskManager`: per-instrument and gross exposure caps, daily-loss kill switch |
+| `stops.rs` | T-2: `StopRules` (stop as % or ATR multiple, take-profit in R, trailing, risk-per-trade sizing, cooldown), `Atr`, `OpenTrade` (levels set before a bar, judged by its low/high, trailed after); the engine applies them to every strategy, off by default |
 | `backtest.rs` | `run` / `run_from` (warm-up) / `run_with_events`: merge series and feed the `Engine`; `BacktestConfig`, `BacktestResult` |
 | `metrics.rs` | `Performance` (return, CAGR, drawdown, Sharpe), `Report` (strategy vs benchmark, `Display`) |
 

@@ -28,6 +28,7 @@ use crate::instrument::InstrumentId;
 use crate::metrics::Report;
 use crate::order::{ExecutionReport, Order, OrderBook, OrderError, OrderStatus};
 use crate::risk::RiskManager;
+use crate::stops::{Atr, OpenTrade};
 use crate::strategy::Strategy;
 use crate::types::{Bar, EquityPoint, Fill};
 
@@ -59,6 +60,20 @@ pub struct PositionSnapshot {
     pub value: f64,
     /// Risk-adjusted target currently held (fraction of equity).
     pub target: f64,
+    /// The open trade's stop and take-profit levels (T-2), when stops are on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub take_profit: Option<f64>,
+}
+
+/// An instrument kept flat after a stop or take-profit until the strategy changes its mind.
+#[derive(Debug, Clone, Copy)]
+struct Blocked {
+    /// The strategy's target when the exit happened.
+    desired: f64,
+    /// Bars since the exit.
+    bars: usize,
 }
 
 /// Point-in-time state of an engine: what a dashboard or state file needs.
@@ -96,6 +111,9 @@ pub struct Engine<'s> {
     fills: Vec<Fill>,
     equity_curve: Vec<EquityPoint>,
     benchmark_curve: Vec<EquityPoint>,
+    atr: BTreeMap<InstrumentId, Atr>,
+    trades: BTreeMap<InstrumentId, OpenTrade>,
+    blocked: BTreeMap<InstrumentId, Blocked>,
 }
 
 impl<'s> Engine<'s> {
@@ -138,6 +156,9 @@ impl<'s> Engine<'s> {
             fills: Vec::new(),
             equity_curve: Vec::new(),
             benchmark_curve: Vec::new(),
+            atr: BTreeMap::new(),
+            trades: BTreeMap::new(),
+            blocked: BTreeMap::new(),
         }
     }
 
@@ -167,12 +188,16 @@ impl<'s> Engine<'s> {
 
         if self.measuring(bar.ts) {
             if let Some(target) = self.pending.remove(instrument) {
+                let before = self.portfolio.position(instrument);
                 self.current.insert(instrument.clone(), target);
                 self.execute(instrument, bar.ts, bar.open, target, &mut out)?;
+                self.track_trade(instrument, before);
             }
+            self.check_exit(instrument, bar, &mut out)?;
             self.portfolio.mark(instrument, bar.close);
             self.benchmark.observe(instrument, bar);
         }
+        self.observe_bar(instrument, bar);
 
         if self.killed {
             return Ok(out);
@@ -214,6 +239,8 @@ impl<'s> Engine<'s> {
                     mark,
                     value: qty * mark,
                     target: self.current.get(instrument).copied().unwrap_or(0.0),
+                    stop: self.trades.get(instrument).map(|t| t.stop),
+                    take_profit: self.trades.get(instrument).and_then(|t| t.take_profit),
                 }
             })
             .collect();
@@ -240,6 +267,7 @@ impl<'s> Engine<'s> {
         self.killed = true;
         self.desired.clear();
         self.pending.clear();
+        self.trades.clear();
         let mut out = Vec::new();
         let working: Vec<_> = self.orders.open().map(|order| order.id).collect();
         for id in working {
@@ -352,6 +380,125 @@ impl<'s> Engine<'s> {
         Ok(())
     }
 
+    /// After a target was executed: open, keep or forget the instrument's trade (T-2).
+    fn track_trade(&mut self, instrument: &InstrumentId, before: f64) {
+        let rules = self.cfg.stops;
+        if !rules.active() {
+            return;
+        }
+        let after = self.portfolio.position(instrument);
+        if after.abs() <= f64::EPSILON {
+            self.trades.remove(instrument);
+            return;
+        }
+        let opened = before.abs() <= f64::EPSILON || before.signum() != after.signum();
+        if !opened {
+            return;
+        }
+        let entry = self
+            .fills
+            .last()
+            .filter(|f| f.instrument == *instrument)
+            .map(|f| f.price);
+        let atr = self.atr.get(instrument).and_then(Atr::value);
+        match entry.and_then(|price| rules.distance(price, atr).map(|d| (price, d))) {
+            Some((price, distance)) => {
+                self.trades.insert(
+                    instrument.clone(),
+                    OpenTrade::open(&rules, after.signum(), price, distance),
+                );
+            }
+            None => {
+                self.trades.remove(instrument);
+            }
+        }
+    }
+
+    /// Exit at a stop or take-profit hit by `bar`; otherwise let a trailing stop follow it.
+    fn check_exit(
+        &mut self,
+        instrument: &InstrumentId,
+        bar: &Bar,
+        out: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        let Some(trade) = self.trades.get(instrument).copied() else {
+            return Ok(());
+        };
+        if self.portfolio.position(instrument).abs() <= f64::EPSILON {
+            self.trades.remove(instrument);
+            return Ok(());
+        }
+        let Some((kind, price)) = trade.check(bar) else {
+            if let Some(open) = self.trades.get_mut(instrument) {
+                open.trail(&self.cfg.stops, bar);
+            }
+            return Ok(());
+        };
+        self.trades.remove(instrument);
+        self.pending.remove(instrument);
+        self.current.insert(instrument.clone(), 0.0);
+        let desired = self.desired.get(instrument).copied().unwrap_or(0.0);
+        self.blocked
+            .insert(instrument.clone(), Blocked { desired, bars: 0 });
+        out.push(Event::Signal {
+            ts: bar.ts,
+            instrument: instrument.clone(),
+            strategy: "stops".into(),
+            target: 0.0,
+            reason: Some(serde_json::json!({
+                "exit": kind, "price": price, "entry": trade.entry, "stop": trade.stop,
+                "take_profit": trade.take_profit, "direction": trade.direction,
+            })),
+        });
+        self.execute(instrument, bar.ts, price, 0.0, out)
+    }
+
+    /// Track the average true range and the bars since an exit (stops on only).
+    fn observe_bar(&mut self, instrument: &InstrumentId, bar: &Bar) {
+        let rules = self.cfg.stops;
+        if !rules.active() {
+            return;
+        }
+        self.atr
+            .entry(instrument.clone())
+            .or_insert_with(|| Atr::new(rules.atr_bars))
+            .push(bar);
+        if let Some(blocked) = self.blocked.get_mut(instrument) {
+            blocked.bars += 1;
+        }
+    }
+
+    /// A risk-adjusted target under the stop rules: flat while blocked after an exit, sized by
+    /// risk per trade on entry, and never grown while a trade is open (no drift in size).
+    fn stop_adjusted(&mut self, instrument: &InstrumentId, target: f64) -> f64 {
+        let rules = self.cfg.stops;
+        if !rules.active() {
+            return target;
+        }
+        if let Some(blocked) = self.blocked.get(instrument).copied() {
+            let desired = self.desired.get(instrument).copied().unwrap_or(0.0);
+            let changed = (desired - blocked.desired).abs() > f64::EPSILON;
+            let cooled = rules.cooldown_bars > 0 && blocked.bars >= rules.cooldown_bars;
+            if changed || cooled {
+                self.blocked.remove(instrument);
+            } else {
+                return 0.0;
+            }
+        }
+        let held = self.current.get(instrument).copied().unwrap_or(0.0);
+        if self.trades.contains_key(instrument)
+            && held.abs() > f64::EPSILON
+            && held.signum() == target.signum()
+        {
+            return target.signum() * target.abs().min(held.abs());
+        }
+        let Some(mark) = self.portfolio.mark_of(instrument) else {
+            return target;
+        };
+        let distance = rules.distance(mark, self.atr.get(instrument).and_then(Atr::value));
+        rules.size(target, mark, distance)
+    }
+
     fn measuring(&self, ts: DateTime<Utc>) -> bool {
         self.measure_from.is_none_or(|start| ts >= start)
     }
@@ -375,6 +522,7 @@ impl<'s> Engine<'s> {
             return;
         }
         for (instrument, target) in self.risk.apply(&self.desired) {
+            let target = self.stop_adjusted(&instrument, target);
             let held = self.current.get(&instrument).copied().unwrap_or(0.0);
             if (target - held).abs() > f64::EPSILON {
                 let already_queued = self
@@ -482,6 +630,7 @@ mod tests {
                 max_daily_loss: 1.0,
                 ..RiskLimits::default()
             },
+            stops: crate::stops::StopRules::default(),
         }
     }
 
@@ -812,5 +961,132 @@ mod tests {
         let mut strategy = BuyAndHold::default();
         let mut engine = Engine::new(&mut strategy, cfg(), &[id("A")], None);
         assert!(engine.flatten(at(0)).expect("flatten").is_empty());
+    }
+
+    fn ohlc(hour: i64, open: f64, high: f64, low: f64, close: f64) -> Bar {
+        Bar {
+            ts: at(hour),
+            open,
+            high,
+            low,
+            close,
+            volume: 1.0,
+        }
+    }
+
+    fn with_stops(stops: crate::stops::StopRules) -> BacktestConfig {
+        BacktestConfig { stops, ..cfg() }
+    }
+
+    fn five_percent() -> crate::stops::StopRules {
+        crate::stops::StopRules {
+            stop_pct: 0.05,
+            ..crate::stops::StopRules::default()
+        }
+    }
+
+    fn exits(events: &[Event]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Signal {
+                    strategy, reason, ..
+                } if strategy == "stops" => reason
+                    .as_ref()
+                    .and_then(|r| r["exit"].as_str())
+                    .map(str::to_owned),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_stop_loss_exits_at_the_stop_and_the_same_signal_does_not_re_enter() {
+        let bars = vec![
+            ohlc(0, 100.0, 100.0, 100.0, 100.0),
+            ohlc(1, 100.0, 101.0, 99.0, 100.0), // enters at 100, stop 95
+            ohlc(2, 99.0, 99.0, 93.0, 94.0),    // stopped at 95
+            ohlc(3, 94.0, 120.0, 94.0, 120.0),
+            ohlc(4, 120.0, 130.0, 120.0, 130.0),
+        ];
+        let (result, events) = run_with_events(
+            &mut BuyAndHold::default(),
+            &[Series::new(id("A"), bars)],
+            &with_stops(five_percent()),
+            None,
+        );
+        assert_eq!(exits(&events), ["stop_loss"]);
+        assert_eq!(result.fills.len(), 2, "{:?}", result.fills);
+        assert!((result.fills[1].price - 95.0).abs() < 1e-9);
+        let end = result.report.end_equity;
+        assert!((end - 950.0).abs() < 1e-6, "lost 5% and stayed out: {end}");
+    }
+
+    #[test]
+    fn take_profit_locks_in_the_gain() {
+        let rules = crate::stops::StopRules {
+            take_profit_r: 2.0,
+            ..five_percent()
+        };
+        let bars = vec![
+            ohlc(0, 100.0, 100.0, 100.0, 100.0),
+            ohlc(1, 100.0, 101.0, 99.0, 100.0),
+            ohlc(2, 104.0, 112.0, 103.0, 108.0), // target 110
+            ohlc(3, 108.0, 108.0, 80.0, 80.0),
+        ];
+        let (result, events) = run_with_events(
+            &mut BuyAndHold::default(),
+            &[Series::new(id("A"), bars)],
+            &with_stops(rules),
+            None,
+        );
+        assert_eq!(exits(&events), ["take_profit"]);
+        assert!((result.report.end_equity - 1_100.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn after_the_cooldown_the_strategy_may_enter_again() {
+        let rules = crate::stops::StopRules {
+            cooldown_bars: 2,
+            ..five_percent()
+        };
+        let bars = vec![
+            ohlc(0, 100.0, 100.0, 100.0, 100.0),
+            ohlc(1, 100.0, 101.0, 99.0, 100.0),
+            ohlc(2, 99.0, 99.0, 93.0, 94.0), // stop
+            ohlc(3, 94.0, 95.0, 93.0, 94.0),
+            ohlc(4, 94.0, 95.0, 93.0, 94.0),
+            ohlc(5, 94.0, 96.0, 94.0, 95.0), // re-entered at this open
+            ohlc(6, 95.0, 96.0, 94.0, 95.0),
+        ];
+        let (result, _) = run_with_events(
+            &mut BuyAndHold::default(),
+            &[Series::new(id("A"), bars)],
+            &with_stops(rules),
+            None,
+        );
+        assert_eq!(result.fills.len(), 3, "{:?}", result.fills);
+    }
+
+    #[test]
+    fn risk_per_trade_sizes_the_position_from_the_stop() {
+        let rules = crate::stops::StopRules {
+            risk_per_trade: 0.01,
+            ..five_percent()
+        };
+        let bars = vec![
+            ohlc(0, 100.0, 100.0, 100.0, 100.0),
+            ohlc(1, 100.0, 101.0, 99.0, 100.0),
+            ohlc(2, 99.0, 99.0, 93.0, 94.0),
+        ];
+        let (result, _) = run_with_events(
+            &mut BuyAndHold::default(),
+            &[Series::new(id("A"), bars)],
+            &with_stops(rules),
+            None,
+        );
+        // 1% risk with a 5% stop → 20% of equity; the stop loses 1% of equity.
+        assert!(result.fills[0].qty.mul_add(100.0, -200.0).abs() < 1e-6);
+        assert!((result.report.end_equity - 990.0).abs() < 1e-6);
     }
 }

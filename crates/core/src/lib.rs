@@ -21,6 +21,7 @@ pub mod ports;
 pub mod predictions;
 pub mod risk;
 pub mod signals;
+pub mod stops;
 pub mod strategies;
 pub mod strategy;
 pub mod traders;
