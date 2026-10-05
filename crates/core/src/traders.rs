@@ -42,6 +42,61 @@ pub struct TraderFill {
     pub price: f64,
     pub size: f64,
     pub opens: Option<f64>,
+    /// Signed position on the coin after the fill (positive long), when the venue says.
+    pub position_after: Option<f64>,
+}
+
+/// A followed trader's side on a coin after a change: `1` long, `-1` short, `0` flat, known
+/// at the end of the hour the change happened in (like calls).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PositionState {
+    pub ts: DateTime<Utc>,
+    pub coin: String,
+    pub state: f64,
+}
+
+/// Every change of side (long / short / flat) in `fills`, oldest first.
+///
+/// Within an hour only the side at its end counts; fills without `position_after` are skipped. Size changes on the
+/// same side are not changes: a follower copies the side, not the trader's sizing.
+pub fn position_states(fills: &[TraderFill]) -> Vec<PositionState> {
+    let mut by_coin: BTreeMap<&str, Vec<&TraderFill>> = BTreeMap::new();
+    for fill in fills {
+        by_coin.entry(fill.coin.as_str()).or_default().push(fill);
+    }
+    let mut out = Vec::new();
+    for (coin, mut fills) in by_coin {
+        fills.sort_by_key(|f| f.ts);
+        // The side at the end of each hour.
+        let mut hours: BTreeMap<DateTime<Utc>, f64> = BTreeMap::new();
+        for fill in fills {
+            let (Some(after), Ok(hour)) = (
+                fill.position_after,
+                fill.ts.duration_trunc(Duration::hours(1)),
+            ) else {
+                continue;
+            };
+            let side = if after.abs() < 1e-9 {
+                0.0
+            } else {
+                after.signum()
+            };
+            hours.insert(hour, side);
+        }
+        let mut last: Option<f64> = None;
+        for (hour, side) in hours {
+            if last.is_none_or(|l| (l - side).abs() > f64::EPSILON) {
+                out.push(PositionState {
+                    ts: hour + Duration::hours(1),
+                    coin: coin.to_owned(),
+                    state: side,
+                });
+                last = Some(side);
+            }
+        }
+    }
+    out.sort_by(|a, b| a.ts.cmp(&b.ts).then_with(|| a.coin.cmp(&b.coin)));
+    out
 }
 
 /// When opening fills count as a call.
@@ -215,7 +270,36 @@ mod tests {
             price,
             size,
             opens,
+            position_after: None,
         }
+    }
+
+    fn moved(minutes: i64, coin: &str, after: f64) -> TraderFill {
+        TraderFill {
+            position_after: Some(after),
+            ..fill(minutes, coin, 100.0, 1.0, None)
+        }
+    }
+
+    #[test]
+    fn position_states_follow_the_side_not_the_size() {
+        let fills = [
+            moved(5, "BTC", 2.0),    // long
+            moved(20, "BTC", 3.0),   // bigger, same side: no change
+            moved(70, "BTC", 0.5),   // smaller, still long: no change
+            moved(130, "BTC", 0.0),  // flat
+            moved(135, "BTC", -1.0), // short within the same hour: only the hour's end counts
+            moved(10, "ETH", 1.0),
+            fill(15, "ETH", 100.0, 1.0, Some(1.0)), // no position_after: skipped
+        ];
+        let states = position_states(&fills);
+        let btc: Vec<(i64, f64)> = states
+            .iter()
+            .filter(|s| s.coin == "BTC")
+            .map(|s| ((s.ts - at(0)).num_minutes(), s.state))
+            .collect();
+        assert_eq!(btc, [(60, 1.0), (180, -1.0)]);
+        assert_eq!(states.iter().filter(|s| s.coin == "ETH").count(), 1);
     }
 
     #[test]
