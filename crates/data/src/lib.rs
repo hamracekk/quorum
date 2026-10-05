@@ -1,12 +1,15 @@
 //! Market data adapters and local storage.
 //!
 //! - [`BinanceSpot`](binance::BinanceSpot) implements the `MarketData` port.
+//! - [`BinanceTestnet`](binance_testnet::BinanceTestnet): signed spot orders on Binance's
+//!   **testnet** only (T-7); it refuses any other host.
 //! - [`ParquetStore`] implements the `BarStore` port: one Parquet file per instrument and
 //!   interval under `<root>/<venue>/`.
 //! - [`sync`] keeps a store current from any `MarketData` source, fetching only bars newer
 //!   than the last one stored.
 
 pub mod binance;
+pub mod binance_testnet;
 pub mod binance_ws;
 mod error;
 mod store;
