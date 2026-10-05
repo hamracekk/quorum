@@ -547,6 +547,45 @@ impl AgentStore for SqliteJournal {
             .await
             .map_err(agent_port)
     }
+
+    async fn post_control(
+        &self,
+        author: &str,
+        instrument: &trader_core::InstrumentId,
+        action: trader_core::suggestions::ControlAction,
+        reason: &str,
+        ts: DateTime<Utc>,
+    ) -> Result<trader_core::suggestions::PositionControl, PortError> {
+        self.insert_control(author, instrument, action, reason, ts)
+            .await
+            .map_err(agent_port)
+    }
+
+    async fn position_controls(
+        &self,
+        status: Option<trader_core::suggestions::ControlStatus>,
+        limit: usize,
+    ) -> Result<Vec<trader_core::suggestions::PositionControl>, PortError> {
+        self.select_controls_by(status, limit)
+            .await
+            .map_err(agent_port)
+    }
+
+    async fn session_controls(
+        &self,
+        session: &str,
+    ) -> Result<Vec<trader_core::suggestions::PositionControl>, PortError> {
+        self.select_session_controls(session)
+            .await
+            .map_err(agent_port)
+    }
+
+    async fn update_control(
+        &self,
+        control: &trader_core::suggestions::PositionControl,
+    ) -> Result<(), PortError> {
+        self.update_control_row(control).await.map_err(agent_port)
+    }
 }
 
 #[cfg(test)]

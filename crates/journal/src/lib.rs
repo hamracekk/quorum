@@ -7,6 +7,7 @@
 
 mod agent_runs;
 mod agents;
+mod controls;
 mod error;
 mod news;
 mod reports;

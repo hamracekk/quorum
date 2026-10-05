@@ -377,6 +377,34 @@ pub trait AgentStore: Send + Sync + fmt::Debug {
         &self,
         suggestion: &crate::suggestions::Suggestion,
     ) -> Result<(), PortError>;
+
+    /// Store a risk-reducing position control by `author` (status `pending`).
+    async fn post_control(
+        &self,
+        author: &str,
+        instrument: &InstrumentId,
+        action: crate::suggestions::ControlAction,
+        reason: &str,
+        ts: DateTime<Utc>,
+    ) -> Result<crate::suggestions::PositionControl, PortError>;
+
+    /// The latest position controls, newest first, optionally with one status.
+    async fn position_controls(
+        &self,
+        status: Option<crate::suggestions::ControlStatus>,
+        limit: usize,
+    ) -> Result<Vec<crate::suggestions::PositionControl>, PortError>;
+
+    /// Controls a paper session applied, in order (for replay).
+    async fn session_controls(
+        &self,
+        session: &str,
+    ) -> Result<Vec<crate::suggestions::PositionControl>, PortError>;
+
+    async fn update_control(
+        &self,
+        control: &crate::suggestions::PositionControl,
+    ) -> Result<(), PortError>;
 }
 
 /// How urgent a notification is.
