@@ -10,6 +10,7 @@ mod agents;
 mod error;
 mod news;
 mod reports;
+mod suggestions;
 
 pub use error::JournalError;
 

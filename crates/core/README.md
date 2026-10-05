@@ -12,7 +12,7 @@ depends on no internal crate.
 | `instrument.rs` | `InstrumentId { venue, symbol, kind }`, `VenueId`, `InstrumentKind`; validated; text form `venue:SYMBOL[:kind]` |
 | `types.rs` | `Bar` (keyed by **open** time), `Series` (one instrument's bars), `Fill`, `Side`, `EquityPoint` |
 | `events.rs` | `Event` (bar, signal, target, fill, risk_halt; tagged JSON) and `Envelope` (with log `seq`) |
-| `engine.rs` | `Engine`: event-driven core — bars in (time order), decision events out; used by backtest, replay and live |
+| `engine.rs` | `Engine`: event-driven core — bars in (time order), decision events out; used by backtest, replay and live; per-trade stops (T-2) and operator-approved `manual_trade`s (T-3) |
 | `ports.rs` | Port traits `MarketData`, `MarketStream` (async), `BarStore`, `EventLog`, `Journal`, `AgentStore`, `NewsSource`, `NewsStore`, `LlmProvider`, `Notifier` (async), `RunInfo`/`RunKind`, `PortError` |
 | `fakes.rs` | In-memory `MemoryMarketData`, `MemoryMarketStream`, `MemoryBarStore`, `MemoryEventLog`, `MemoryNewsSource`, `MemoryLlm`, `MemoryNotifier` for tests in any crate |
 | `indicators.rs` | Streaming `Ema`, `Rsi` (Wilder), `Macd`, `Bollinger` |
@@ -26,6 +26,8 @@ depends on no internal crate.
 | `news.rs` | `NewsItem`, `NewsQuery`, `StoredNews`, `NewsSourceStats`, `title_key`, `DUPLICATE_WINDOW_HOURS`; M5b: `NewsEvent` (direction, magnitude, confidence, horizon, event type), `Extraction`, `TokenUsage` |
 | `order.rs` | `Order`, `OrderId`, `OrderStatus`, `ExecutionReport`, `OrderBook`: the order state machine, rejecting illegal transitions and overfills |
 | `risk.rs` | `RiskLimits`, `RiskManager`: per-instrument and gross exposure caps, daily-loss kill switch |
+| `suggestions.rs` | T-3: `NewSuggestion` (validation: size cap, stop required to open, bounds), `Suggestion`, `Side`, `Status` |
+| `stops.rs` | T-2: `StopRules` (stop as % or ATR multiple, take-profit in R, trailing, risk-per-trade sizing, cooldown), `Atr`, `OpenTrade` (levels set before a bar, judged by its low/high, trailed after); the engine applies them to every strategy, off by default |
 | `backtest.rs` | `run` / `run_from` (warm-up) / `run_with_events`: merge series and feed the `Engine`; `BacktestConfig`, `BacktestResult` |
 | `metrics.rs` | `Performance` (return, CAGR, drawdown, Sharpe), `Report` (strategy vs benchmark, `Display`) |
 

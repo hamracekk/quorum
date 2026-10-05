@@ -6,6 +6,7 @@ use crate::events::Event;
 use crate::instrument::InstrumentId;
 use crate::metrics::Report;
 use crate::risk::RiskLimits;
+use crate::stops::StopRules;
 use crate::strategy::Strategy;
 use crate::types::{Bar, EquityPoint, Fill, Series};
 
@@ -16,6 +17,8 @@ pub struct BacktestConfig {
     pub fee_rate: f64,
     pub slippage_bps: f64,
     pub risk: RiskLimits,
+    /// Per-trade exits and risk-per-trade sizing (T-2); off by default.
+    pub stops: StopRules,
 }
 
 impl Default for BacktestConfig {
@@ -25,6 +28,7 @@ impl Default for BacktestConfig {
             fee_rate: 0.001,
             slippage_bps: 2.0,
             risk: RiskLimits::default(),
+            stops: StopRules::default(),
         }
     }
 }
@@ -131,6 +135,7 @@ mod tests {
                 max_daily_loss: 1.0,
                 ..RiskLimits::default()
             },
+            stops: StopRules::default(),
         }
     }
 

@@ -21,14 +21,16 @@ pub mod ports;
 pub mod predictions;
 pub mod risk;
 pub mod signals;
+pub mod stops;
 pub mod strategies;
 pub mod strategy;
+pub mod suggestions;
 pub mod traders;
 pub mod types;
 
 pub use backtest::{BacktestConfig, BacktestResult, run, run_from, run_with_events};
 pub use broker::{Broker, PaperBroker, Portfolio};
-pub use engine::{Engine, EngineError, EngineSnapshot, PositionSnapshot};
+pub use engine::{Engine, EngineError, EngineSnapshot, ManualTrade, PositionSnapshot};
 pub use events::{Envelope, Event};
 pub use instrument::{InstrumentError, InstrumentId, InstrumentKind, VenueId};
 pub use metrics::{Performance, Report};

@@ -500,6 +500,53 @@ impl AgentStore for SqliteJournal {
     ) -> Result<Vec<AgentReport>, PortError> {
         self.select_reports(agent, limit).await.map_err(agent_port)
     }
+
+    async fn post_suggestion(
+        &self,
+        author: &str,
+        suggestion: &trader_core::suggestions::NewSuggestion,
+        price: Option<f64>,
+        ts: DateTime<Utc>,
+    ) -> Result<trader_core::suggestions::Suggestion, PortError> {
+        self.insert_suggestion(author, suggestion, price, ts)
+            .await
+            .map_err(agent_port)
+    }
+
+    async fn suggestion(
+        &self,
+        id: i64,
+    ) -> Result<Option<trader_core::suggestions::Suggestion>, PortError> {
+        self.suggestion_by_id(id).await.map_err(agent_port)
+    }
+
+    async fn suggestions(
+        &self,
+        status: Option<trader_core::suggestions::Status>,
+        limit: usize,
+    ) -> Result<Vec<trader_core::suggestions::Suggestion>, PortError> {
+        self.select_suggestions(status, limit)
+            .await
+            .map_err(agent_port)
+    }
+
+    async fn session_suggestions(
+        &self,
+        session: &str,
+    ) -> Result<Vec<trader_core::suggestions::Suggestion>, PortError> {
+        self.select_session_suggestions(session)
+            .await
+            .map_err(agent_port)
+    }
+
+    async fn update_suggestion(
+        &self,
+        suggestion: &trader_core::suggestions::Suggestion,
+    ) -> Result<(), PortError> {
+        self.update_suggestion_row(suggestion)
+            .await
+            .map_err(agent_port)
+    }
 }
 
 #[cfg(test)]
