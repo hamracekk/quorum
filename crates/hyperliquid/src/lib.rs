@@ -155,6 +155,20 @@ struct Fill {
     sz: String,
     time: i64,
     dir: String,
+    /// Signed position before the fill.
+    #[serde(rename = "startPosition", default)]
+    start_position: Option<String>,
+}
+
+/// The position after a fill: `start` moved by `size` in the direction `dir` implies (buys
+/// open longs and close shorts; sells the reverse).
+pub fn position_after(dir: &str, start: f64, size: f64) -> Option<f64> {
+    let delta = match dir {
+        "Open Long" | "Close Short" | "Short > Long" | "Buy" => size,
+        "Open Short" | "Close Long" | "Long > Short" | "Sell" => -size,
+        _ => return None,
+    };
+    Some(start + delta)
 }
 
 fn number(text: &str) -> Option<f64> {
@@ -361,6 +375,11 @@ impl TraderSource for HyperliquidSource {
                     price: number(&f.px)?,
                     size: number(&f.sz)?,
                     opens: opens(&f.dir),
+                    position_after: f
+                        .start_position
+                        .as_deref()
+                        .and_then(number)
+                        .and_then(|start| position_after(&f.dir, start, number(&f.sz)?)),
                     coin: f.coin,
                 })
             }));

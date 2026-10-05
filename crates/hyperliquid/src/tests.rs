@@ -145,3 +145,12 @@ async fn the_leaderboard_reads_windows_and_skips_bad_rows() {
     assert!((rows[0].month.roi - 0.1).abs() < 1e-12);
     assert!((rows[0].all_time.volume - 900_000.0).abs() < 1e-6);
 }
+
+#[test]
+fn the_position_after_a_fill_follows_its_direction() {
+    assert_eq!(position_after("Open Long", 0.0, 2.0), Some(2.0));
+    assert_eq!(position_after("Close Long", 2.0, 2.0), Some(0.0));
+    assert_eq!(position_after("Long > Short", 2.0, 3.0), Some(-1.0));
+    assert_eq!(position_after("Close Short", -1.0, 1.0), Some(0.0));
+    assert_eq!(position_after("Liquidated Isolated Long", 1.0, 1.0), None);
+}
