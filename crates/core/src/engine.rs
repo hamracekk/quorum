@@ -23,6 +23,7 @@ use serde::Serialize;
 
 use crate::backtest::{BacktestConfig, BacktestResult};
 use crate::broker::{Broker, PaperBroker, Portfolio};
+use crate::derivatives::FundingPoint;
 use crate::events::Event;
 use crate::instrument::InstrumentId;
 use crate::metrics::Report;
@@ -136,6 +137,10 @@ pub struct Engine<'s> {
     /// volatility the portfolio brake watches (only kept when that brake is on).
     closes: BTreeMap<InstrumentId, f64>,
     stamp_returns: Vec<f64>,
+    /// Perpetual funding still to settle, per instrument, oldest first.
+    funding: BTreeMap<InstrumentId, std::collections::VecDeque<FundingPoint>>,
+    /// Net funding paid so far (negative: received).
+    funding_paid: f64,
 }
 
 impl<'s> Engine<'s> {
@@ -184,6 +189,8 @@ impl<'s> Engine<'s> {
             manual: BTreeMap::new(),
             closes: BTreeMap::new(),
             stamp_returns: Vec::new(),
+            funding: BTreeMap::new(),
+            funding_paid: 0.0,
         }
     }
 
@@ -205,7 +212,10 @@ impl<'s> Engine<'s> {
                     latest,
                 });
             }
-            Some(latest) if bar.ts > latest => self.close_timestamp(latest, &mut out),
+            Some(latest) if bar.ts > latest => {
+                self.close_timestamp(latest, &mut out);
+                self.settle_funding(bar.ts);
+            }
             _ => {}
         }
         self.open_ts = Some(bar.ts);
@@ -323,6 +333,46 @@ impl<'s> Engine<'s> {
         }])
     }
 
+    /// Perpetual funding for `instrument` (settled as cash at each funding time on the position
+    /// held then: longs pay a positive rate, shorts receive it).
+    pub fn add_funding(&mut self, instrument: &InstrumentId, points: &[FundingPoint]) {
+        let queue = self.funding.entry(instrument.clone()).or_default();
+        queue.extend(points.iter().copied());
+        queue.make_contiguous().sort_by_key(|p| p.ts);
+    }
+
+    /// Net funding paid so far (negative: received).
+    pub const fn funding_paid(&self) -> f64 {
+        self.funding_paid
+    }
+
+    /// Settle every funding print up to `now` on the positions held through it.
+    fn settle_funding(&mut self, now: DateTime<Utc>) {
+        let measuring = self.measuring(now);
+        for (instrument, queue) in &mut self.funding {
+            while queue.front().is_some_and(|p| p.ts <= now) {
+                let Some(point) = queue.pop_front() else {
+                    break;
+                };
+                if !measuring {
+                    continue;
+                }
+                let qty = self.portfolio.position(instrument);
+                if qty > 0.0 && !self.cfg.perp_longs {
+                    continue; // a spot long pays no funding
+                }
+                let Some(mark) = self.portfolio.mark_of(instrument) else {
+                    continue;
+                };
+                let paid = qty * mark * point.rate;
+                if paid.abs() > 0.0 {
+                    self.portfolio.adjust_cash(-paid);
+                    self.funding_paid += paid;
+                }
+            }
+        }
+    }
+
     /// Pass external calls (live news readings, …) to the strategy.
     pub fn inform(&mut self, calls: &[crate::strategy::ExternalCall]) {
         self.strategy.inform(calls);
@@ -406,17 +456,19 @@ impl<'s> Engine<'s> {
         if let Some(latest) = self.open_ts.take() {
             self.close_timestamp(latest, &mut out);
         }
-        let report = Report::compute(
+        let mut report = Report::compute(
             self.cfg.initial_cash,
             &self.equity_curve,
             &self.benchmark_curve,
             &self.fills,
         );
+        report.funding = self.funding_paid;
         let result = BacktestResult {
             equity_curve: self.equity_curve,
             benchmark_curve: self.benchmark_curve,
             fills: self.fills,
             report,
+            funding: self.funding_paid,
         };
         (result, out)
     }
@@ -796,6 +848,7 @@ mod tests {
                 ..RiskLimits::default()
             },
             stops: crate::stops::StopRules::default(),
+            perp_longs: true,
         }
     }
 

@@ -98,3 +98,18 @@ fn cross_sectional_momentum_holds_the_strongest_riser_whatever_the_feed_order() 
         "order does not matter"
     );
 }
+
+#[test]
+fn with_shorts_a_falling_trend_is_held_short() {
+    let mut s = TrendMomentum::new(3, PLAIN).with_shorts(true);
+    let a = id("A");
+    let closes = [10.0, 11.0, 12.0, 13.0, 11.0, 10.0, 9.0];
+    let targets: Vec<Option<f64>> = closes
+        .iter()
+        .zip(0_i32..)
+        .map(|(c, day)| s.on_bar(&a, &bar(day, *c)))
+        .collect();
+    assert_eq!(targets[3], Some(1.0));
+    assert_eq!(targets[5], Some(-1.0), "10 < 12: short");
+    assert_eq!(targets[6], None, "still short");
+}

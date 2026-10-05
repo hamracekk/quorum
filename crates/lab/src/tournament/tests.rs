@@ -16,6 +16,7 @@ fn report(sharpe: f64, drawdown: f64, trades: usize, benchmark_sharpe: f64) -> R
         benchmark: perf(benchmark_sharpe, 0.3),
         trades,
         fees: 0.0,
+        funding: 0.0,
     }
 }
 

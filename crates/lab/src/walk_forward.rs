@@ -162,7 +162,9 @@ fn stitch(results: &[BacktestResult], initial: f64) -> Report {
             bench_scale *= result.benchmark_curve.last().map_or(initial, |p| p.equity) / initial;
         }
     }
-    Report::compute(initial, &curve, &benchmark, &fills)
+    let mut report = Report::compute(initial, &curve, &benchmark, &fills);
+    report.funding = results.iter().map(|r| r.funding).sum();
+    report
 }
 
 fn scaled(curve: &[EquityPoint], scale: f64) -> impl Iterator<Item = EquityPoint> + '_ {

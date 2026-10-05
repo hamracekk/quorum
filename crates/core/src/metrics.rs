@@ -56,6 +56,8 @@ pub struct Report {
     pub benchmark: Performance,
     pub trades: usize,
     pub fees: f64,
+    /// Net perpetual funding paid (negative: received); `0` on spot.
+    pub funding: f64,
 }
 
 impl Report {
@@ -72,6 +74,7 @@ impl Report {
             benchmark: Performance::from_curve(initial, benchmark_curve),
             trades: fills.len(),
             fees: fills.iter().map(|f| f.fee).sum(),
+            funding: 0.0,
         }
     }
 }
@@ -142,7 +145,15 @@ impl fmt::Display for Report {
             f,
             "  trades        {}  (fees {:.2})",
             self.trades, self.fees
-        )
+        )?;
+        if self.funding.abs() > f64::EPSILON {
+            write!(
+                f,
+                "\n  funding paid  {:.2}  (negative = received)",
+                self.funding
+            )?;
+        }
+        Ok(())
     }
 }
 
