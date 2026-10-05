@@ -30,6 +30,9 @@ pub struct WalkForwardReport<P> {
     pub windows: Vec<Window<P>>,
     /// All test windows chained into one out-of-sample equity curve.
     pub out_of_sample: Report,
+    /// That stitched curve (for combining strategies); not sent to the dashboard.
+    #[serde(skip)]
+    pub curve: Vec<EquityPoint>,
 }
 
 /// Rolling walk-forward evaluation.
@@ -107,9 +110,11 @@ pub fn walk_forward_with<P: Clone>(
         start += wf.test_bars;
     }
 
+    let stitched = stitch(&results, cfg.initial_cash);
     Ok(WalkForwardReport {
         windows,
-        out_of_sample: stitch(&results, cfg.initial_cash),
+        out_of_sample: stitched.0,
+        curve: stitched.1,
     })
 }
 
@@ -147,7 +152,7 @@ fn best_params<P: Clone>(
 }
 
 /// Chain test windows as if the capital rolled from one into the next.
-fn stitch(results: &[BacktestResult], initial: f64) -> Report {
+fn stitch(results: &[BacktestResult], initial: f64) -> (Report, Vec<EquityPoint>) {
     let mut curve = Vec::new();
     let mut benchmark = Vec::new();
     let mut fills = Vec::new();
@@ -164,7 +169,7 @@ fn stitch(results: &[BacktestResult], initial: f64) -> Report {
     }
     let mut report = Report::compute(initial, &curve, &benchmark, &fills);
     report.funding = results.iter().map(|r| r.funding).sum();
-    report
+    (report, curve)
 }
 
 fn scaled(curve: &[EquityPoint], scale: f64) -> impl Iterator<Item = EquityPoint> + '_ {

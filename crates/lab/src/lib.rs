@@ -7,6 +7,7 @@
 
 pub mod carry;
 mod error;
+pub mod portfolio;
 pub mod scoreboard;
 pub mod signals;
 mod sweep;
