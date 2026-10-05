@@ -23,6 +23,10 @@ pub const MAX_EVIDENCE: usize = 10;
 /// Stop distance bounds (fractions of the price).
 pub const MIN_STOP: f64 = 0.002;
 pub const MAX_STOP: f64 = 0.5;
+/// `decided_by` of a decision the operator made.
+pub const OPERATOR_DECISION: &str = "operator";
+/// `decided_by` of a decision the operator's auto-accept policy made (T-6).
+pub const POLICY_DECISION: &str = "policy";
 /// Longest a suggestion stays open for a decision.
 pub const MAX_EXPIRY_HOURS: i64 = 72;
 
@@ -209,6 +213,8 @@ pub struct Suggestion {
     pub status: Status,
     pub decided_at: Option<DateTime<Utc>>,
     pub decision_reason: Option<String>,
+    /// Who decided: [`OPERATOR_DECISION`] or [`POLICY_DECISION`] (the auto-accept policy).
+    pub decided_by: Option<String>,
     /// The paper session that applied it, and the bar time it took effect after.
     pub session_id: Option<String>,
     pub applied_after: Option<DateTime<Utc>>,

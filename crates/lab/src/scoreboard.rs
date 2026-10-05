@@ -57,6 +57,8 @@ pub enum SourceKind {
     Prediction,
     /// Followed traders' opening fills (SRC-3).
     Trader,
+    /// Agents' position suggestions (T-6).
+    Suggestion,
     Technical,
     Baseline,
 }

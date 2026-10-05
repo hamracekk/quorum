@@ -1,4 +1,4 @@
-//! Position suggestions (T-3, migration `0011_suggestions.sql`).
+//! Position suggestions (T-3, migrations `0011_suggestions.sql`, `0013_suggestion_decided_by.sql`).
 
 use std::str::FromStr;
 
@@ -14,7 +14,7 @@ macro_rules! columns {
     () => {
         "id, author, created_at, expires_at, instrument, side, size, stop_pct, take_profit_pct, \
          price, rationale, evidence, confidence, status, decided_at, decision_reason, \
-         session_id, applied_after, executed_at"
+         session_id, applied_after, executed_at, decided_by"
     };
 }
 
@@ -53,6 +53,7 @@ fn suggestion_from(row: &SqliteRow) -> Result<Suggestion, JournalError> {
         session_id: row.try_get("session_id")?,
         applied_after: ts("applied_after")?,
         executed_at: ts("executed_at")?,
+        decided_by: row.try_get("decided_by")?,
     })
 }
 
@@ -144,7 +145,7 @@ impl SqliteJournal {
     pub(crate) async fn update_suggestion_row(&self, s: &Suggestion) -> Result<(), JournalError> {
         let updated = sqlx::query(
             "UPDATE suggestions SET status = ?, decided_at = ?, decision_reason = ?, \
-             session_id = ?, applied_after = ?, executed_at = ? WHERE id = ?",
+             session_id = ?, applied_after = ?, executed_at = ?, decided_by = ? WHERE id = ?",
         )
         .bind(s.status.as_str())
         .bind(s.decided_at.map(format_ts))
@@ -152,6 +153,7 @@ impl SqliteJournal {
         .bind(s.session_id.as_deref())
         .bind(s.applied_after.map(format_ts))
         .bind(s.executed_at.map(format_ts))
+        .bind(s.decided_by.as_deref())
         .bind(s.id)
         .execute(&self.pool)
         .await?
