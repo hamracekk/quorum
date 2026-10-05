@@ -99,6 +99,8 @@ pub struct EngineSnapshot {
     pub cash: f64,
     pub equity: f64,
     pub halted: bool,
+    /// Share of the targets the portfolio brakes keep (E-5); `1` = no brake.
+    pub risk_scale: f64,
     /// True after the kill switch: positions flattened, strategy ignored.
     pub killed: bool,
     pub positions: Vec<PositionSnapshot>,
@@ -130,6 +132,10 @@ pub struct Engine<'s> {
     trades: BTreeMap<InstrumentId, OpenTrade>,
     blocked: BTreeMap<InstrumentId, Blocked>,
     manual: BTreeMap<InstrumentId, ManualTrade>,
+    /// Latest close per instrument and this timestamp's log returns, for the market
+    /// volatility the portfolio brake watches (only kept when that brake is on).
+    closes: BTreeMap<InstrumentId, f64>,
+    stamp_returns: Vec<f64>,
 }
 
 impl<'s> Engine<'s> {
@@ -176,6 +182,8 @@ impl<'s> Engine<'s> {
             trades: BTreeMap::new(),
             blocked: BTreeMap::new(),
             manual: BTreeMap::new(),
+            closes: BTreeMap::new(),
+            stamp_returns: Vec::new(),
         }
     }
 
@@ -345,6 +353,7 @@ impl<'s> Engine<'s> {
             cash: self.portfolio.cash(),
             equity: self.portfolio.equity(),
             halted: self.risk.halted(),
+            risk_scale: self.risk.scale(),
             killed: self.killed,
             positions,
             pending: self
@@ -580,6 +589,13 @@ impl<'s> Engine<'s> {
         if let Some(blocked) = self.blocked.get_mut(instrument) {
             blocked.bars += 1;
         }
+        if self.cfg.risk.portfolio.vol_on()
+            && bar.close > 0.0
+            && let Some(prev) = self.closes.insert(instrument.clone(), bar.close)
+            && prev > 0.0
+        {
+            self.stamp_returns.push((bar.close / prev).ln());
+        }
         let rules = self.cfg.stops;
         if !rules.active() {
             return;
@@ -629,10 +645,16 @@ impl<'s> Engine<'s> {
     }
 
     fn close_timestamp(&mut self, ts: DateTime<Utc>, out: &mut Vec<Event>) {
+        if !self.stamp_returns.is_empty() {
+            let mean = self.stamp_returns.iter().sum::<f64>() / self.stamp_returns.len() as f64;
+            self.risk.observe_market(mean);
+            self.stamp_returns.clear();
+        }
         if self.measuring(ts) {
             let equity = self.portfolio.equity();
             let was_halted = self.risk.halted();
             self.risk.update(ts, equity);
+            self.risk.observe_equity(equity);
             if self.risk.halted() && !was_halted {
                 out.push(Event::RiskHalt { ts, equity });
             }

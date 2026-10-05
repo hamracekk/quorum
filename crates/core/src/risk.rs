@@ -1,8 +1,88 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use chrono::{DateTime, NaiveDate, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::instrument::InstrumentId;
+
+/// Portfolio-level brakes (E-5): shrink every target when the portfolio is in a drawdown or the
+/// market turns unusually volatile. All off by default.
+///
+/// The scale moves in steps of [`PortfolioRisk::STEP`] so a slowly changing drawdown does not
+/// turn into a trade on every bar.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PortfolioRisk {
+    /// Drawdown from the equity peak where de-risking starts (`0` = off).
+    pub drawdown_start: f64,
+    /// Drawdown where exposure reaches `drawdown_min_scale`.
+    pub drawdown_floor: f64,
+    /// Smallest share of the targets kept in a deep drawdown.
+    pub drawdown_min_scale: f64,
+    /// Bars behind the equity peak (`0` = since the start).
+    pub drawdown_window: usize,
+    /// Market volatility over `vol_short_bars` above this multiple of its `vol_long_bars` level
+    /// counts as a high-volatility regime (`0` = off). The market is the equal-weight universe.
+    pub vol_regime_ratio: f64,
+    /// Share of the targets kept in a high-volatility regime.
+    pub vol_regime_scale: f64,
+    pub vol_short_bars: usize,
+    pub vol_long_bars: usize,
+}
+
+impl PortfolioRisk {
+    /// Every brake off.
+    pub const OFF: Self = Self {
+        drawdown_start: 0.0,
+        drawdown_floor: 0.0,
+        drawdown_min_scale: 1.0,
+        drawdown_window: 0,
+        vol_regime_ratio: 0.0,
+        vol_regime_scale: 1.0,
+        vol_short_bars: 20,
+        vol_long_bars: 365,
+    };
+    /// Granularity of the scale.
+    pub const STEP: f64 = 0.25;
+
+    /// Whether the drawdown brake is configured.
+    pub const fn drawdown_on(&self) -> bool {
+        self.drawdown_start > 0.0 && self.drawdown_floor > self.drawdown_start
+    }
+
+    /// Whether the volatility-regime brake is configured.
+    pub const fn vol_on(&self) -> bool {
+        self.vol_regime_ratio > 0.0
+            && self.vol_short_bars >= 2
+            && self.vol_long_bars > self.vol_short_bars
+    }
+
+    /// The share of targets kept at drawdown `dd` (a fraction) and volatility ratio `ratio`.
+    pub fn scale(&self, dd: f64, ratio: Option<f64>) -> f64 {
+        let mut scale = 1.0;
+        if self.drawdown_on() && dd > self.drawdown_start {
+            let min = self.drawdown_min_scale.clamp(0.0, 1.0);
+            let t = ((dd - self.drawdown_start) / (self.drawdown_floor - self.drawdown_start))
+                .clamp(0.0, 1.0);
+            scale *= t.mul_add(min - 1.0, 1.0);
+        }
+        if self.vol_on() && ratio.is_some_and(|r| r > self.vol_regime_ratio) {
+            scale *= self.vol_regime_scale.clamp(0.0, 1.0);
+        }
+        if scale >= 1.0 {
+            return 1.0;
+        }
+        // Down to the step below, never under the configured minimums.
+        let floor = (self.drawdown_min_scale * self.vol_regime_scale).clamp(0.0, 1.0);
+        ((scale / Self::STEP).floor() * Self::STEP).max(floor)
+    }
+}
+
+impl Default for PortfolioRisk {
+    fn default() -> Self {
+        Self::OFF
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct RiskLimits {
@@ -14,6 +94,8 @@ pub struct RiskLimits {
     /// Flatten and stop trading for the rest of the UTC day once equity falls
     /// this fraction below the day's opening equity.
     pub max_daily_loss: f64,
+    /// Drawdown and volatility-regime brakes (E-5).
+    pub portfolio: PortfolioRisk,
 }
 
 impl Default for RiskLimits {
@@ -23,6 +105,7 @@ impl Default for RiskLimits {
             max_gross_exposure: 1.0,
             allow_short: false,
             max_daily_loss: 0.05,
+            portfolio: PortfolioRisk::OFF,
         }
     }
 }
@@ -34,6 +117,14 @@ pub struct RiskManager {
     day: Option<NaiveDate>,
     day_open_equity: f64,
     halted: bool,
+    /// Equity at closed timestamps (for the drawdown peak).
+    equity: VecDeque<f64>,
+    peak: f64,
+    drawdown: f64,
+    /// The market's return per timestamp (mean log return of the instruments that traded),
+    /// warm-up included, for the volatility regime.
+    returns: VecDeque<f64>,
+    scale: f64,
 }
 
 impl RiskManager {
@@ -43,7 +134,65 @@ impl RiskManager {
             day: None,
             day_open_equity: 0.0,
             halted: false,
+            equity: VecDeque::new(),
+            peak: 0.0,
+            drawdown: 0.0,
+            returns: VecDeque::new(),
+            scale: 1.0,
         }
+    }
+
+    /// Record a measured timestamp's equity (drawdown brake).
+    pub fn observe_equity(&mut self, equity: f64) {
+        let p = self.limits.portfolio;
+        if !p.drawdown_on() {
+            return;
+        }
+        if p.drawdown_window > 0 {
+            self.equity.push_back(equity);
+            while self.equity.len() > p.drawdown_window {
+                self.equity.pop_front();
+            }
+            self.peak = self.equity.iter().copied().fold(0.0, f64::max);
+        } else {
+            self.peak = self.peak.max(equity);
+        }
+        self.drawdown = if self.peak > 0.0 {
+            (1.0 - equity / self.peak).max(0.0)
+        } else {
+            0.0
+        };
+        self.scale = p.scale(self.drawdown, self.vol_ratio());
+    }
+
+    /// Record the market's return over a closed timestamp (volatility brake; warm-up too).
+    pub fn observe_market(&mut self, ret: f64) {
+        let p = self.limits.portfolio;
+        if !p.vol_on() || !ret.is_finite() {
+            return;
+        }
+        self.returns.push_back(ret);
+        while self.returns.len() > p.vol_long_bars {
+            self.returns.pop_front();
+        }
+        self.scale = p.scale(self.drawdown, self.vol_ratio());
+    }
+
+    /// Recent market volatility over its long-run level, once `vol_long_bars` returns are known.
+    fn vol_ratio(&self) -> Option<f64> {
+        let p = self.limits.portfolio;
+        if self.returns.len() < p.vol_long_bars {
+            return None;
+        }
+        let all: Vec<f64> = self.returns.iter().copied().collect();
+        let short = stdev(&all[all.len().saturating_sub(p.vol_short_bars)..])?;
+        let long = stdev(&all)?;
+        (long > 0.0).then(|| short / long)
+    }
+
+    /// The share of targets the portfolio brakes keep (`1` = no brake).
+    pub const fn scale(&self) -> f64 {
+        self.scale
     }
 
     pub fn update(&mut self, ts: DateTime<Utc>, equity: f64) {
@@ -87,8 +236,23 @@ impl RiskManager {
                 *target *= scale;
             }
         }
+        if self.scale < 1.0 {
+            for target in targets.values_mut() {
+                *target *= self.scale;
+            }
+        }
         targets
     }
+}
+
+fn stdev(values: &[f64]) -> Option<f64> {
+    if values.len() < 2 {
+        return None;
+    }
+    let n = values.len() as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
+    Some(var.sqrt())
 }
 
 #[cfg(test)]
@@ -172,5 +336,68 @@ mod tests {
         let out = risk.apply(&targets(&[("A", 0.5), ("B", 0.5)]));
         assert_close(out[&id("A")], 0.0);
         assert_close(out[&id("B")], 0.0);
+    }
+
+    const BRAKES: PortfolioRisk = PortfolioRisk {
+        drawdown_start: 0.2,
+        drawdown_floor: 0.4,
+        drawdown_min_scale: 0.25,
+        drawdown_window: 0,
+        vol_regime_ratio: 1.5,
+        vol_regime_scale: 0.5,
+        vol_short_bars: 5,
+        vol_long_bars: 40,
+    };
+
+    #[test]
+    fn the_drawdown_brake_steps_down_between_start_and_floor() {
+        assert_close(BRAKES.scale(0.1, None), 1.0);
+        assert_close(BRAKES.scale(0.25, None), 0.75);
+        assert_close(BRAKES.scale(0.3, None), 0.5);
+        assert_close(BRAKES.scale(0.5, None), 0.25);
+        assert_close(BRAKES.scale(0.1, Some(2.0)), 0.5);
+        assert_close(BRAKES.scale(0.1, Some(1.2)), 1.0);
+        assert_close(PortfolioRisk::OFF.scale(0.9, Some(9.0)), 1.0);
+    }
+
+    #[test]
+    fn a_deep_drawdown_shrinks_every_target_and_recovers_with_equity() {
+        let mut risk = RiskManager::new(RiskLimits {
+            portfolio: PortfolioRisk {
+                vol_regime_ratio: 0.0,
+                ..BRAKES
+            },
+            ..RiskLimits::default()
+        });
+        for equity in [100.0, 110.0, 120.0] {
+            risk.observe_equity(equity);
+        }
+        assert_close(risk.scale(), 1.0);
+        risk.observe_equity(84.0);
+        assert_close(risk.scale(), 0.5);
+        let out = risk.apply(&targets(&[("A", 0.5), ("B", 0.5)]));
+        assert_close(out[&id("A")], 0.25);
+        risk.observe_equity(118.0);
+        assert_close(risk.scale(), 1.0);
+    }
+
+    #[test]
+    fn a_volatile_market_halves_exposure() {
+        let mut risk = RiskManager::new(RiskLimits {
+            portfolio: PortfolioRisk {
+                drawdown_start: 0.0,
+                drawdown_floor: 0.0,
+                ..BRAKES
+            },
+            ..RiskLimits::default()
+        });
+        for i in 0..40 {
+            risk.observe_market(if i % 2 == 0 { 0.01 } else { -0.01 });
+        }
+        assert_close(risk.scale(), 1.0);
+        for i in 0..5 {
+            risk.observe_market(if i % 2 == 0 { 0.10 } else { -0.10 });
+        }
+        assert_close(risk.scale(), 0.5);
     }
 }

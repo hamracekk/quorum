@@ -25,7 +25,7 @@ depends on no internal crate.
 | `agents.rs` | ADR 0003 types: `NewFinding`/`Finding` (kind, claim, typed `Hypothesis`, `Evidence`, confidence, status, supersession, latest `Verdict`), `TrackRecord` (hit rate, Brier), `NewMessage`/`AgentMessage`, `AgentControl`, agent-id rules and shape validation |
 | `news.rs` | `NewsItem`, `NewsQuery`, `StoredNews`, `NewsSourceStats`, `title_key`, `DUPLICATE_WINDOW_HOURS`; M5b: `NewsEvent` (direction, magnitude, confidence, horizon, event type), `Extraction`, `TokenUsage` |
 | `order.rs` | `Order`, `OrderId`, `OrderStatus`, `ExecutionReport`, `OrderBook`: the order state machine, rejecting illegal transitions and overfills |
-| `risk.rs` | `RiskLimits`, `RiskManager`: per-instrument and gross exposure caps, daily-loss kill switch |
+| `risk.rs` | `RiskLimits`, `RiskManager`: per-instrument and gross exposure caps, daily-loss kill switch; E-5 `PortfolioRisk` brakes (drawdown, volatility regime) scaling every target in 25% steps |
 | `strategies/follow_traders.rs` | T-4: `FollowTraders` — each instrument on the average side of the followed traders who trade it (from `follow:` position states), equal share per instrument |
 | `strategies/momentum.rs` | E-1: `TrendMomentum` (long while the `lookback` return is positive; run with `PerInstrument`) and `XsMomentum` (the `top` rising instruments by `lookback` return, ranked on the previous timestamp so feed order never matters); `VolTarget` sizing (`min(1, target_vol / realised vol)`) with a rebalance `band` |
 | `suggestions.rs` | T-3: `NewSuggestion` (validation: size cap, stop required to open, bounds), `Suggestion`, `Side`, `Status` |
