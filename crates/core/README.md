@@ -27,6 +27,7 @@ depends on no internal crate.
 | `order.rs` | `Order`, `OrderId`, `OrderStatus`, `ExecutionReport`, `OrderBook`: the order state machine, rejecting illegal transitions and overfills |
 | `risk.rs` | `RiskLimits`, `RiskManager`: per-instrument and gross exposure caps, daily-loss kill switch |
 | `strategies/follow_traders.rs` | T-4: `FollowTraders` — each instrument on the average side of the followed traders who trade it (from `follow:` position states), equal share per instrument |
+| `strategies/momentum.rs` | E-1: `TrendMomentum` (long while the `lookback` return is positive; run with `PerInstrument`) and `XsMomentum` (the `top` rising instruments by `lookback` return, ranked on the previous timestamp so feed order never matters); `VolTarget` sizing (`min(1, target_vol / realised vol)`) with a rebalance `band` |
 | `suggestions.rs` | T-3: `NewSuggestion` (validation: size cap, stop required to open, bounds), `Suggestion`, `Side`, `Status` |
 | `stops.rs` | T-2: `StopRules` (stop as % or ATR multiple, take-profit in R, trailing, risk-per-trade sizing, cooldown), `Atr`, `OpenTrade` (levels set before a bar, judged by its low/high, trailed after); the engine applies them to every strategy, off by default |
 | `backtest.rs` | `run` / `run_from` (warm-up) / `run_with_events`: merge series and feed the `Engine`; `BacktestConfig`, `BacktestResult` |
