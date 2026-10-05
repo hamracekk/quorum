@@ -5181,10 +5181,13 @@ dependencies = [
  "chrono",
  "futures-core",
  "futures-util",
+ "hex",
+ "hmac",
  "parquet",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
@@ -5328,6 +5331,7 @@ dependencies = [
  "trader-news",
  "trader-predictions",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
