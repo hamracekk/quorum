@@ -227,6 +227,81 @@ impl Suggestion {
     }
 }
 
+/// A risk-reducing action on one open paper position (T-5), by a watcher agent.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "action")]
+pub enum ControlAction {
+    /// Move the stop to this price (closer to the market only).
+    TightenStop { stop: f64 },
+    /// Close the position.
+    Close,
+}
+
+impl ControlAction {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TightenStop { .. } => "tighten_stop",
+            Self::Close => "close",
+        }
+    }
+}
+
+/// What became of a control.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlStatus {
+    /// Waiting for the paper session.
+    Pending,
+    Applied,
+    /// The session could not apply it (no position, not tighter, …): see the note.
+    Refused,
+}
+
+impl ControlStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Applied => "applied",
+            Self::Refused => "refused",
+        }
+    }
+}
+
+impl FromStr for ControlStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(Self::Pending),
+            "applied" => Ok(Self::Applied),
+            "refused" => Ok(Self::Refused),
+            other => Err(format!("unknown control status `{other}`")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PositionControl {
+    pub id: i64,
+    pub author: String,
+    pub created_at: DateTime<Utc>,
+    pub instrument: InstrumentId,
+    #[serde(flatten)]
+    pub action: ControlAction,
+    pub reason: String,
+    pub status: ControlStatus,
+    pub note: Option<String>,
+    pub session_id: Option<String>,
+    pub applied_after: Option<DateTime<Utc>>,
+    pub applied_at: Option<DateTime<Utc>>,
+}
+
+impl PositionControl {
+    pub fn label(&self) -> String {
+        format!("control #{} by {}", self.id, self.author)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -259,6 +259,62 @@ impl<'s> Engine<'s> {
         vec![event]
     }
 
+    /// Move the stop of the open position on `instrument` closer to the price (T-5): risk only
+    /// goes down — for a long the new stop must be above the current one and below the latest
+    /// price, for a short the reverse. A position without a stop gets one. Returns the decision
+    /// event, or why the move was refused.
+    pub fn tighten_stop(
+        &mut self,
+        instrument: &InstrumentId,
+        stop: f64,
+        label: &str,
+    ) -> Result<Vec<Event>, String> {
+        let qty = self.portfolio.position(instrument);
+        if self.killed || qty.abs() <= f64::EPSILON {
+            return Err(format!("no open position on {instrument}"));
+        }
+        let mark = self
+            .portfolio
+            .mark_of(instrument)
+            .ok_or_else(|| format!("no price for {instrument} yet"))?;
+        let direction = qty.signum();
+        if !(stop.is_finite() && stop > 0.0) || direction * (mark - stop) <= 0.0 {
+            return Err(format!(
+                "a stop at {stop} would trigger at once (latest price {mark})"
+            ));
+        }
+        let previous = self.trades.get(instrument).map(|t| t.stop);
+        if previous.is_some_and(|p| direction * (stop - p) <= 0.0) {
+            return Err(format!(
+                "{stop} is not tighter than the current stop {}",
+                previous.unwrap_or_default()
+            ));
+        }
+        let trade = self
+            .trades
+            .entry(instrument.clone())
+            .or_insert_with(|| OpenTrade {
+                direction,
+                entry: mark,
+                distance: (mark - stop).abs(),
+                stop,
+                take_profit: None,
+                best: mark,
+                trailed: false,
+            });
+        trade.stop = stop;
+        trade.trailed = true;
+        Ok(vec![Event::Signal {
+            ts: self.open_ts.unwrap_or_default(),
+            instrument: instrument.clone(),
+            strategy: "watcher".into(),
+            target: self.current.get(instrument).copied().unwrap_or(0.0),
+            reason: Some(serde_json::json!({
+                "tightened_stop": stop, "previous_stop": previous, "by": label,
+            })),
+        }])
+    }
+
     /// Pass external calls (live news readings, …) to the strategy.
     pub fn inform(&mut self, calls: &[crate::strategy::ExternalCall]) {
         self.strategy.inform(calls);
@@ -1275,6 +1331,39 @@ mod tests {
         assert!(
             engine.snapshot().positions.is_empty(),
             "buy & hold does not re-enter on the same signal"
+        );
+    }
+
+    #[test]
+    fn a_stop_can_only_be_tightened_and_then_exits_there() {
+        let mut strategy = BuyAndHold::default();
+        let mut engine = Engine::new(&mut strategy, cfg(), &[id("A")], None);
+        feed(
+            &mut engine,
+            &[
+                ohlc(0, 100.0, 100.0, 100.0, 100.0),
+                ohlc(1, 100.0, 110.0, 100.0, 108.0), // long from 100, marked at 108
+            ],
+        );
+        assert!(
+            engine.tighten_stop(&id("A"), 109.0, "w").is_err(),
+            "above the price"
+        );
+        let events = engine
+            .tighten_stop(&id("A"), 102.0, "watcher")
+            .expect("tightened");
+        assert!(matches!(&events[0], Event::Signal { strategy, .. } if strategy == "watcher"));
+        assert!(
+            engine.tighten_stop(&id("A"), 101.0, "w").is_err(),
+            "looser is refused"
+        );
+        assert_eq!(engine.snapshot().positions[0].stop, Some(102.0));
+        let after = feed(&mut engine, &[ohlc(2, 107.0, 107.0, 101.0, 103.0)]);
+        assert_eq!(exits(&after), ["trailing_stop"]);
+        assert!(engine.snapshot().positions.is_empty());
+        assert!(
+            engine.tighten_stop(&id("A"), 99.0, "w").is_err(),
+            "nothing to protect"
         );
     }
 }
