@@ -10,7 +10,7 @@ loop here (M9).
 |---|---|
 | `lib.rs` | `StrategyFactory<P>` (any `Fn(&P) -> Box<dyn Strategy>`), `slice_all` helper |
 | `sweep.rs` | `sweep(grid, factory, series, cfg)`: backtest every parameter set, sorted by Sharpe |
-| `walk_forward.rs` | `walk_forward(...)`: rolling train/test windows, stitched out-of-sample `Report` |
+| `walk_forward.rs` | `walk_forward(...)`: rolling train/test windows, stitched out-of-sample `Report`; `walk_forward_with(...)` lets a parameter set also change the backtest config (per-trade stops chosen with the SMA pair) |
 | `signals.rs` | Event study: bias-signed forward returns (next open → close h bars later) per signal, baseline, net of costs, t-stat, in-sample vs out-of-sample, verdict |
 | `scoreboard.rs` | Scoreboard: directional occurrences per source traded from the first open after they were known, at time horizons; mean, hit rate, net, t, IC (Spearman), pending outcomes, recent-window decay; baselines `always_long` and `random`; excess over the drift (`mean − bias × always-long mean`) and its t decide the verdict (edge / no_edge / collecting / too_few); a source's `since` keeps earlier occurrences (why it was picked) out of the record, reported as `in_sample` |
 | `tournament.rs` | Section 5 rules: `review(standings, rules)` → promote the best challenger that beat the champion's Sharpe without a worse drawdown on enough days and trades; retire one trailing buy & hold at consecutive reviews |
