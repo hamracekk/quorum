@@ -45,6 +45,21 @@ pub fn walk_forward<P: Clone>(
     cfg: &BacktestConfig,
     wf: WalkForwardConfig,
 ) -> Result<WalkForwardReport<P>, LabError> {
+    walk_forward_with(grid, factory, |_, base| *base, series, cfg, wf)
+}
+
+/// [`walk_forward`] where a parameter set can also change the backtest configuration.
+///
+/// `configure` maps a parameter set and the base configuration to the configuration it is
+/// trained and tested with, e.g. per-trade stops chosen alongside the strategy's parameters.
+pub fn walk_forward_with<P: Clone>(
+    grid: &[P],
+    factory: &impl StrategyFactory<P>,
+    configure: impl Fn(&P, &BacktestConfig) -> BacktestConfig,
+    series: &[Series],
+    cfg: &BacktestConfig,
+    wf: WalkForwardConfig,
+) -> Result<WalkForwardReport<P>, LabError> {
     if grid.is_empty() {
         return Err(LabError::EmptyGrid);
     }
@@ -73,11 +88,12 @@ pub fn walk_forward<P: Clone>(
             .unwrap_or(DateTime::<Utc>::MAX_UTC);
 
         let train = slice_all(series, train_start, test_start);
-        let (params, train_sharpe) = best_params(grid, factory, &train, cfg);
+        let (params, train_sharpe) = best_params(grid, factory, &configure, &train, cfg);
 
         let full = slice_all(series, train_start, after_test);
         let mut strategy = factory.build(&params);
-        let result = run_from(strategy.as_mut(), &full, cfg, Some(test_start));
+        let chosen = configure(&params, cfg);
+        let result = run_from(strategy.as_mut(), &full, &chosen, Some(test_start));
 
         windows.push(Window {
             train_start,
@@ -111,13 +127,17 @@ fn timeline(series: &[Series]) -> Vec<DateTime<Utc>> {
 fn best_params<P: Clone>(
     grid: &[P],
     factory: &impl StrategyFactory<P>,
+    configure: &impl Fn(&P, &BacktestConfig) -> BacktestConfig,
     train: &[Series],
     cfg: &BacktestConfig,
 ) -> (P, f64) {
     let mut best: Option<(&P, f64)> = None;
     for params in grid {
         let mut strategy = factory.build(params);
-        let sharpe = run(strategy.as_mut(), train, cfg).report.strategy.sharpe;
+        let sharpe = run(strategy.as_mut(), train, &configure(params, cfg))
+            .report
+            .strategy
+            .sharpe;
         if best.is_none_or(|(_, top)| sharpe > top) {
             best = Some((params, sharpe));
         }

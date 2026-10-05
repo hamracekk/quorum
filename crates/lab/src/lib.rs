@@ -14,7 +14,9 @@ mod walk_forward;
 
 pub use error::LabError;
 pub use sweep::{SweepRow, sweep};
-pub use walk_forward::{WalkForwardConfig, WalkForwardReport, Window, walk_forward};
+pub use walk_forward::{
+    WalkForwardConfig, WalkForwardReport, Window, walk_forward, walk_forward_with,
+};
 
 use chrono::{DateTime, Utc};
 use trader_core::{Series, Strategy};
