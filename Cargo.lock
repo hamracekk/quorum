@@ -5090,6 +5090,7 @@ dependencies = [
  "tracing",
  "trader-core",
  "trader-data",
+ "trader-journal",
  "trader-mcp",
  "trader-service",
 ]
