@@ -23,10 +23,7 @@ fn series(prices: &[f64]) -> Series {
             volume: 1.0,
         })
         .collect();
-    Series {
-        instrument: btc(),
-        bars,
-    }
+    Series::new(btc(), bars)
 }
 
 fn call(ts: DateTime<Utc>, direction: f64, strength: f64) -> Occurrence {

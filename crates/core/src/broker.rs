@@ -223,6 +223,11 @@ impl Portfolio {
     }
 
     /// Book an executed trade: cash pays notional plus fee, the position moves by `qty`.
+    /// Pay (`amount < 0`) or receive cash outside a fill, e.g. perpetual funding.
+    pub fn adjust_cash(&mut self, amount: f64) {
+        self.cash += amount;
+    }
+
     pub fn apply(&mut self, fill: &Fill) {
         let signed = match fill.side {
             Side::Buy => fill.qty,

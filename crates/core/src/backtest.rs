@@ -19,6 +19,9 @@ pub struct BacktestConfig {
     pub risk: RiskLimits,
     /// Per-trade exits and risk-per-trade sizing (T-2); off by default.
     pub stops: StopRules,
+    /// With funding: whether longs are held as perpetuals and pay it too (`false`: longs are
+    /// spot, only shorts — perpetuals — settle funding).
+    pub perp_longs: bool,
 }
 
 impl Default for BacktestConfig {
@@ -29,6 +32,7 @@ impl Default for BacktestConfig {
             slippage_bps: 2.0,
             risk: RiskLimits::default(),
             stops: StopRules::default(),
+            perp_longs: true,
         }
     }
 }
@@ -40,6 +44,8 @@ pub struct BacktestResult {
     pub benchmark_curve: Vec<EquityPoint>,
     pub fills: Vec<Fill>,
     pub report: Report,
+    /// Net perpetual funding paid (negative: received); `0` on spot.
+    pub funding: f64,
 }
 
 /// Replay `series` through `strategy` from the first bar.
@@ -85,6 +91,9 @@ pub fn run_with_events(
         .map(|s| s.instrument.clone())
         .collect();
     let mut engine = Engine::new(strategy, *cfg, &universe, measure_from);
+    for s in series.iter().filter(|s| !s.funding.is_empty()) {
+        engine.add_funding(&s.instrument, &s.funding);
+    }
 
     let mut events = Vec::new();
     for (i, bar) in bars {
@@ -136,6 +145,7 @@ mod tests {
                 ..RiskLimits::default()
             },
             stops: StopRules::default(),
+            perp_longs: true,
         }
     }
 
@@ -333,5 +343,37 @@ mod tests {
 
         assert_eq!(recorder.seen.len(), 6);
         assert!(recorder.seen.windows(2).all(|w| w[0] <= w[1]));
+    }
+
+    #[test]
+    fn longs_pay_and_shorts_receive_perpetual_funding() {
+        use crate::derivatives::FundingPoint;
+        let flat = [(100.0, 100.0); 6];
+        let mut perp = series("PERP", &flat);
+        let at = |i: usize| perp.bars[i].ts;
+        perp.funding = (2..5)
+            .map(|i| FundingPoint {
+                ts: at(i),
+                rate: 0.001,
+            })
+            .collect();
+        let cfg = BacktestConfig {
+            fee_rate: 0.0,
+            slippage_bps: 0.0,
+            ..BacktestConfig::default()
+        };
+        let long = run(&mut BuyAndHold::default(), &[perp.clone()], &cfg);
+        assert!(
+            long.funding > 0.0,
+            "a long pays positive funding: {}",
+            long.funding
+        );
+        let end = long.equity_curve.last().map_or(0.0, |p| p.equity);
+        assert!(
+            (end + long.funding - 10_000.0).abs() < 1e-6,
+            "equity is lower by what was paid"
+        );
+        let spot = run(&mut BuyAndHold::default(), &[series("SPOT", &flat)], &cfg);
+        assert!(spot.funding.abs() < f64::EPSILON, "no funding on spot");
     }
 }

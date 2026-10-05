@@ -65,10 +65,11 @@ impl VolTarget {
         }
     }
 
-    /// `next` unless it is within `band` of `held` (entries and exits always pass).
+    /// `next` unless it is within `band` of `held` on the same side (entries, exits and
+    /// flips always pass).
     fn banded(&self, held: Option<f64>, next: f64) -> Option<f64> {
         match held {
-            Some(h) if h > 0.0 && next > 0.0 && ((next - h).abs() / h) <= self.band => None,
+            Some(h) if h * next > 0.0 && ((next - h).abs() / h.abs()) <= self.band => None,
             Some(h) if (h - next).abs() < f64::EPSILON => None,
             _ => Some(next),
         }
@@ -93,11 +94,13 @@ fn momentum(closes: &VecDeque<f64>, lookback: usize) -> Option<f64> {
     (then > 0.0).then(|| now / then - 1.0)
 }
 
-/// Time-series momentum on one asset: long (vol-sized) while the `lookback` return is positive.
+/// Time-series momentum on one asset: long (vol-sized) while the `lookback` return is positive;
+/// with shorts allowed, short while it is negative (perpetuals, step 1 of ADR 0007).
 #[derive(Debug, Clone)]
 pub struct TrendMomentum {
     lookback: usize,
     sizing: VolTarget,
+    short: bool,
     closes: VecDeque<f64>,
     held: Option<f64>,
 }
@@ -107,9 +110,17 @@ impl TrendMomentum {
         Self {
             lookback: lookback.max(1),
             sizing,
+            short: false,
             closes: VecDeque::new(),
             held: None,
         }
+    }
+
+    /// Also hold a short while the trend is down.
+    #[must_use]
+    pub const fn with_shorts(mut self, short: bool) -> Self {
+        self.short = short;
+        self
     }
 }
 
@@ -121,9 +132,11 @@ impl Strategy for TrendMomentum {
     fn on_bar(&mut self, _instrument: &InstrumentId, bar: &Bar) -> Option<f64> {
         let cap = self.lookback.max(self.sizing.vol_bars) + 1;
         push_close(&mut self.closes, bar.close, cap);
-        let rising = momentum(&self.closes, self.lookback)? > 0.0;
-        let next = if rising {
+        let trend = momentum(&self.closes, self.lookback)?;
+        let next = if trend > 0.0 {
             self.sizing.scale(&self.closes)
+        } else if self.short && trend < 0.0 {
+            -self.sizing.scale(&self.closes)
         } else {
             0.0
         };

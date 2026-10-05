@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::derivatives::FundingPoint;
 use crate::instrument::InstrumentId;
 
 /// One OHLCV candle. `ts` is the bar's open time.
@@ -19,11 +20,19 @@ pub struct Bar {
 pub struct Series {
     pub instrument: InstrumentId,
     pub bars: Vec<Bar>,
+    /// Perpetual funding settled on the instrument (empty for spot): positions pay or receive
+    /// it at each funding time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub funding: Vec<FundingPoint>,
 }
 
 impl Series {
     pub const fn new(instrument: InstrumentId, bars: Vec<Bar>) -> Self {
-        Self { instrument, bars }
+        Self {
+            instrument,
+            bars,
+            funding: Vec::new(),
+        }
     }
 
     /// Bars with `start <= ts < end`.
@@ -34,6 +43,12 @@ impl Series {
         Self {
             instrument: self.instrument.clone(),
             bars: self.bars[lo..hi].to_vec(),
+            funding: self
+                .funding
+                .iter()
+                .filter(|f| f.ts >= start && f.ts < end)
+                .copied()
+                .collect(),
         }
     }
 }
