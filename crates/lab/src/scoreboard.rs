@@ -59,6 +59,8 @@ pub enum SourceKind {
     Trader,
     /// Agents' position suggestions (T-6).
     Suggestion,
+    /// Perpetual-futures funding extremes (E-2).
+    Derivatives,
     Technical,
     Baseline,
 }
