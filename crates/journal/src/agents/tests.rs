@@ -472,3 +472,58 @@ async fn reports_are_stored_with_their_facts_newest_first() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn suggestions_are_stored_decided_and_replayed_per_session() {
+    use trader_core::suggestions::{NewSuggestion, Side, Status};
+    let journal = SqliteJournal::in_memory().await.expect("journal");
+    let new = NewSuggestion {
+        instrument: btc(),
+        side: Side::Long,
+        size: 0.2,
+        stop_pct: Some(0.05),
+        take_profit_pct: None,
+        rationale: "Followed traders are long and news is bullish.".into(),
+        evidence: vec!["finding:1".into()],
+        confidence: Some(0.6),
+        expires_in: chrono::Duration::hours(24),
+    };
+    let mut s = journal
+        .post_suggestion("scout", &new, Some(83_000.0), at(0))
+        .await
+        .expect("post");
+    assert_eq!(s.status, Status::Pending);
+    assert_eq!(s.expires_at, at(24));
+    assert!((s.target() - 0.2).abs() < 1e-12);
+    s.status = Status::Executed;
+    s.session_id = Some("sess-1".into());
+    s.applied_after = Some(at(3));
+    s.executed_at = Some(at(3));
+    journal.update_suggestion(&s).await.expect("update");
+    assert_eq!(
+        journal.suggestion(s.id).await.expect("get"),
+        Some(s.clone())
+    );
+    assert_eq!(
+        journal
+            .session_suggestions("sess-1")
+            .await
+            .expect("session"),
+        vec![s.clone()]
+    );
+    assert!(
+        journal
+            .session_suggestions("other")
+            .await
+            .expect("other")
+            .is_empty()
+    );
+    assert_eq!(
+        journal
+            .suggestions(Some(Status::Pending), 10)
+            .await
+            .expect("pending")
+            .len(),
+        0
+    );
+}

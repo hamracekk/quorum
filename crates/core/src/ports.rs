@@ -344,6 +344,39 @@ pub trait AgentStore: Send + Sync + fmt::Debug {
         agent: Option<&str>,
         limit: usize,
     ) -> Result<Vec<AgentReport>, PortError>;
+
+    /// Store a position suggestion by `author` (status `pending`).
+    async fn post_suggestion(
+        &self,
+        author: &str,
+        suggestion: &crate::suggestions::NewSuggestion,
+        price: Option<f64>,
+        ts: DateTime<Utc>,
+    ) -> Result<crate::suggestions::Suggestion, PortError>;
+
+    async fn suggestion(
+        &self,
+        id: i64,
+    ) -> Result<Option<crate::suggestions::Suggestion>, PortError>;
+
+    /// The latest suggestions, newest first, optionally with one status.
+    async fn suggestions(
+        &self,
+        status: Option<crate::suggestions::Status>,
+        limit: usize,
+    ) -> Result<Vec<crate::suggestions::Suggestion>, PortError>;
+
+    /// Suggestions a paper session applied, in order (for replay).
+    async fn session_suggestions(
+        &self,
+        session: &str,
+    ) -> Result<Vec<crate::suggestions::Suggestion>, PortError>;
+
+    /// Save a suggestion's status, decision and execution fields.
+    async fn update_suggestion(
+        &self,
+        suggestion: &crate::suggestions::Suggestion,
+    ) -> Result<(), PortError>;
 }
 
 /// How urgent a notification is.

@@ -65,6 +65,21 @@ pub struct PositionSnapshot {
     pub stop: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub take_profit: Option<f64>,
+    /// Who holds the position when it is not the strategy, e.g. `suggestion #3 by scout`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manual: Option<String>,
+}
+
+/// An operator-approved trade on one instrument (an accepted suggestion, T-3): it replaces the
+/// strategy's target there until the trade closes, with its own stop and take-profit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ManualTrade {
+    /// Fraction of equity; `0` closes the position.
+    pub target: f64,
+    /// Stop and take-profit distances as fractions of the entry price.
+    pub stop_pct: Option<f64>,
+    pub take_profit_pct: Option<f64>,
+    pub label: String,
 }
 
 /// An instrument kept flat after a stop or take-profit until the strategy changes its mind.
@@ -114,6 +129,7 @@ pub struct Engine<'s> {
     atr: BTreeMap<InstrumentId, Atr>,
     trades: BTreeMap<InstrumentId, OpenTrade>,
     blocked: BTreeMap<InstrumentId, Blocked>,
+    manual: BTreeMap<InstrumentId, ManualTrade>,
 }
 
 impl<'s> Engine<'s> {
@@ -159,6 +175,7 @@ impl<'s> Engine<'s> {
             atr: BTreeMap::new(),
             trades: BTreeMap::new(),
             blocked: BTreeMap::new(),
+            manual: BTreeMap::new(),
         }
     }
 
@@ -220,6 +237,28 @@ impl<'s> Engine<'s> {
         Ok(out)
     }
 
+    /// Apply an operator-approved trade on `instrument` (T-3): from the next timestamp its target
+    /// replaces the strategy's there, until the trade is closed (by its stop, take-profit or a
+    /// close). Returns the decision event to record.
+    pub fn manual_trade(&mut self, instrument: &InstrumentId, trade: ManualTrade) -> Vec<Event> {
+        if self.killed {
+            return Vec::new();
+        }
+        self.blocked.remove(instrument);
+        let event = Event::Signal {
+            ts: self.open_ts.unwrap_or_default(),
+            instrument: instrument.clone(),
+            strategy: "suggestion".into(),
+            target: trade.target,
+            reason: Some(serde_json::json!({
+                "manual": trade.label, "stop_pct": trade.stop_pct,
+                "take_profit_pct": trade.take_profit_pct,
+            })),
+        };
+        self.manual.insert(instrument.clone(), trade);
+        vec![event]
+    }
+
     /// Pass external calls (live news readings, …) to the strategy.
     pub fn inform(&mut self, calls: &[crate::strategy::ExternalCall]) {
         self.strategy.inform(calls);
@@ -241,6 +280,7 @@ impl<'s> Engine<'s> {
                     target: self.current.get(instrument).copied().unwrap_or(0.0),
                     stop: self.trades.get(instrument).map(|t| t.stop),
                     take_profit: self.trades.get(instrument).and_then(|t| t.take_profit),
+                    manual: self.manual.get(instrument).map(|m| m.label.clone()),
                 }
             })
             .collect();
@@ -268,6 +308,7 @@ impl<'s> Engine<'s> {
         self.desired.clear();
         self.pending.clear();
         self.trades.clear();
+        self.manual.clear();
         let mut out = Vec::new();
         let working: Vec<_> = self.orders.open().map(|order| order.id).collect();
         for id in working {
@@ -382,13 +423,31 @@ impl<'s> Engine<'s> {
 
     /// After a target was executed: open, keep or forget the instrument's trade (T-2).
     fn track_trade(&mut self, instrument: &InstrumentId, before: f64) {
-        let rules = self.cfg.stops;
-        if !rules.active() {
-            return;
+        let manual = self.manual.get(instrument).cloned();
+        let mut rules = self.cfg.stops;
+        if let Some(m) = &manual {
+            // A manual trade brings its own levels (no stop: none, whatever `[stops]` says).
+            rules = crate::stops::StopRules {
+                stop_pct: m.stop_pct.unwrap_or(0.0),
+                stop_atr: 0.0,
+                take_profit_r: match (m.stop_pct, m.take_profit_pct) {
+                    (Some(stop), Some(tp)) if stop > 0.0 => tp / stop,
+                    _ => 0.0,
+                },
+                trailing: false,
+                ..rules
+            };
         }
         let after = self.portfolio.position(instrument);
         if after.abs() <= f64::EPSILON {
             self.trades.remove(instrument);
+            if manual.is_some_and(|m| m.target.abs() <= f64::EPSILON) {
+                // A manual close is done: back to the strategy once it changes its mind.
+                self.release_manual(instrument);
+            }
+            return;
+        }
+        if !rules.active() {
             return;
         }
         let opened = before.abs() <= f64::EPSILON || before.signum() != after.signum();
@@ -437,9 +496,7 @@ impl<'s> Engine<'s> {
         self.trades.remove(instrument);
         self.pending.remove(instrument);
         self.current.insert(instrument.clone(), 0.0);
-        let desired = self.desired.get(instrument).copied().unwrap_or(0.0);
-        self.blocked
-            .insert(instrument.clone(), Blocked { desired, bars: 0 });
+        self.release_manual(instrument);
         out.push(Event::Signal {
             ts: bar.ts,
             instrument: instrument.clone(),
@@ -453,8 +510,20 @@ impl<'s> Engine<'s> {
         self.execute(instrument, bar.ts, price, 0.0, out)
     }
 
-    /// Track the average true range and the bars since an exit (stops on only).
+    /// The manual trade on `instrument` is over: the strategy takes over again, but stays flat
+    /// until it changes its target (so it does not undo the exit at once).
+    fn release_manual(&mut self, instrument: &InstrumentId) {
+        self.manual.remove(instrument);
+        let desired = self.desired.get(instrument).copied().unwrap_or(0.0);
+        self.blocked
+            .insert(instrument.clone(), Blocked { desired, bars: 0 });
+    }
+
+    /// Track the bars since an exit, and the average true range when stops are on.
     fn observe_bar(&mut self, instrument: &InstrumentId, bar: &Bar) {
+        if let Some(blocked) = self.blocked.get_mut(instrument) {
+            blocked.bars += 1;
+        }
         let rules = self.cfg.stops;
         if !rules.active() {
             return;
@@ -463,17 +532,14 @@ impl<'s> Engine<'s> {
             .entry(instrument.clone())
             .or_insert_with(|| Atr::new(rules.atr_bars))
             .push(bar);
-        if let Some(blocked) = self.blocked.get_mut(instrument) {
-            blocked.bars += 1;
-        }
     }
 
     /// A risk-adjusted target under the stop rules: flat while blocked after an exit, sized by
     /// risk per trade on entry, and never grown while a trade is open (no drift in size).
     fn stop_adjusted(&mut self, instrument: &InstrumentId, target: f64) -> f64 {
         let rules = self.cfg.stops;
-        if !rules.active() {
-            return target;
+        if self.manual.contains_key(instrument) {
+            return target; // sized and stopped by the operator's approval
         }
         if let Some(blocked) = self.blocked.get(instrument).copied() {
             let desired = self.desired.get(instrument).copied().unwrap_or(0.0);
@@ -484,6 +550,9 @@ impl<'s> Engine<'s> {
             } else {
                 return 0.0;
             }
+        }
+        if !rules.active() {
+            return target;
         }
         let held = self.current.get(instrument).copied().unwrap_or(0.0);
         if self.trades.contains_key(instrument)
@@ -521,7 +590,25 @@ impl<'s> Engine<'s> {
         if self.killed {
             return;
         }
-        for (instrument, target) in self.risk.apply(&self.desired) {
+        // A close asked for while already flat is done at once.
+        let done: Vec<InstrumentId> = self
+            .manual
+            .iter()
+            .filter(|(i, m)| {
+                m.target.abs() <= f64::EPSILON
+                    && self.portfolio.position(i).abs() <= f64::EPSILON
+                    && !self.pending.contains_key(*i)
+            })
+            .map(|(i, _)| i.clone())
+            .collect();
+        for instrument in done {
+            self.release_manual(&instrument);
+        }
+        let mut wanted = self.desired.clone();
+        for (instrument, trade) in &self.manual {
+            wanted.insert(instrument.clone(), trade.target);
+        }
+        for (instrument, target) in self.risk.apply(&wanted) {
             let target = self.stop_adjusted(&instrument, target);
             let held = self.current.get(&instrument).copied().unwrap_or(0.0);
             if (target - held).abs() > f64::EPSILON {
@@ -1088,5 +1175,106 @@ mod tests {
         // 1% risk with a 5% stop → 20% of equity; the stop loses 1% of equity.
         assert!(result.fills[0].qty.mul_add(100.0, -200.0).abs() < 1e-6);
         assert!((result.report.end_equity - 990.0).abs() < 1e-6);
+    }
+
+    /// A strategy that never wants a position (so only manual trades trade).
+    #[derive(Debug)]
+    struct Flat;
+
+    impl Strategy for Flat {
+        fn name(&self) -> &'static str {
+            "flat"
+        }
+
+        fn on_bar(&mut self, _instrument: &InstrumentId, _bar: &Bar) -> Option<f64> {
+            Some(0.0)
+        }
+    }
+
+    fn feed(engine: &mut Engine<'_>, bars: &[Bar]) -> Vec<Event> {
+        bars.iter()
+            .flat_map(|b| engine.on_bar(&id("A"), b).expect("bar"))
+            .collect()
+    }
+
+    #[test]
+    fn a_manual_trade_overrides_the_strategy_until_its_stop_then_hands_back() {
+        let mut strategy = Flat;
+        let mut engine = Engine::new(&mut strategy, cfg(), &[id("A")], None);
+        feed(&mut engine, &[ohlc(0, 100.0, 100.0, 100.0, 100.0)]);
+        let events = engine.manual_trade(
+            &id("A"),
+            ManualTrade {
+                target: 0.5,
+                stop_pct: Some(0.05),
+                take_profit_pct: Some(0.10),
+                label: "suggestion #1 by scout".into(),
+            },
+        );
+        assert!(matches!(&events[0], Event::Signal { strategy, .. } if strategy == "suggestion"));
+        feed(
+            &mut engine,
+            &[
+                ohlc(1, 100.0, 101.0, 99.0, 100.0), // enters 50% at 100, stop 95, target 110
+            ],
+        );
+        let open = engine.snapshot();
+        assert_eq!(open.positions.len(), 1);
+        assert_eq!(
+            open.positions[0].manual.as_deref(),
+            Some("suggestion #1 by scout")
+        );
+        assert_eq!(open.positions[0].stop, Some(95.0));
+        assert_eq!(open.positions[0].take_profit, Some(110.0));
+        let after = feed(
+            &mut engine,
+            &[
+                ohlc(2, 99.0, 99.0, 94.0, 95.0), // stopped at 95
+                ohlc(3, 95.0, 96.0, 95.0, 96.0),
+            ],
+        );
+        assert_eq!(exits(&after), ["stop_loss"]);
+        let flat = engine.snapshot();
+        assert!(flat.positions.is_empty(), "{flat:?}");
+        let (result, _) = engine.finish();
+        assert!(
+            (result.report.end_equity - 975.0).abs() < 1e-6,
+            "lost 5% of half"
+        );
+    }
+
+    #[test]
+    fn a_manual_close_flattens_and_the_strategy_waits_for_a_new_signal() {
+        let mut strategy = BuyAndHold::default();
+        let mut engine = Engine::new(&mut strategy, cfg(), &[id("A")], None);
+        feed(
+            &mut engine,
+            &[
+                ohlc(0, 100.0, 100.0, 100.0, 100.0),
+                ohlc(1, 100.0, 100.0, 100.0, 100.0), // buy & hold enters
+            ],
+        );
+        assert_eq!(engine.snapshot().positions.len(), 1);
+        engine.manual_trade(
+            &id("A"),
+            ManualTrade {
+                target: 0.0,
+                stop_pct: None,
+                take_profit_pct: None,
+                label: "suggestion #2 by risk".into(),
+            },
+        );
+        feed(
+            &mut engine,
+            &[
+                ohlc(2, 100.0, 100.0, 100.0, 100.0), // closed at this open
+                ohlc(3, 100.0, 100.0, 100.0, 100.0),
+                ohlc(4, 100.0, 100.0, 100.0, 100.0),
+            ],
+        );
+        assert!(
+            engine.snapshot().positions.is_empty(),
+            "buy & hold does not re-enter on the same signal"
+        );
     }
 }
