@@ -36,6 +36,10 @@ pub struct StopRules {
     pub risk_per_trade: f64,
     /// Bars an instrument stays flat after an exit; `0` = until the strategy changes its target.
     pub cooldown_bars: usize,
+    /// Crash stop: exit a long whose price falls this fraction below the previous close (a short
+    /// whose price rises as much), filled at that level — or at the open on a gap — like a stop
+    /// order resting at the exchange. `0` = off. Independent of the other rules.
+    pub crash_pct: f64,
 }
 
 impl Default for StopRules {
@@ -48,6 +52,7 @@ impl Default for StopRules {
             trailing: false,
             risk_per_trade: 0.0,
             cooldown_bars: 0,
+            crash_pct: 0.0,
         }
     }
 }

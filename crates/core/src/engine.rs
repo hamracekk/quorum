@@ -137,6 +137,8 @@ pub struct Engine<'s> {
     /// volatility the portfolio brake watches (only kept when that brake is on).
     closes: BTreeMap<InstrumentId, f64>,
     stamp_returns: Vec<f64>,
+    /// The latest measured close per instrument (the crash stop's reference).
+    last_close: BTreeMap<InstrumentId, f64>,
     /// Perpetual funding still to settle, per instrument, oldest first.
     funding: BTreeMap<InstrumentId, std::collections::VecDeque<FundingPoint>>,
     /// Net funding paid so far (negative: received).
@@ -196,6 +198,7 @@ impl<'s> Engine<'s> {
             stamp_returns: Vec::new(),
             funding: BTreeMap::new(),
             funding_paid: 0.0,
+            last_close: BTreeMap::new(),
         }
     }
 
@@ -233,8 +236,10 @@ impl<'s> Engine<'s> {
                 self.execute(instrument, bar.ts, bar.open, target, &mut out)?;
                 self.track_trade(instrument, before);
             }
+            self.check_crash(instrument, bar, &mut out)?;
             self.check_exit(instrument, bar, &mut out)?;
             self.portfolio.mark(instrument, bar.close);
+            self.last_close.insert(instrument.clone(), bar.close);
             self.benchmark.observe(instrument, bar);
         }
         self.observe_bar(instrument, bar);
@@ -627,6 +632,48 @@ impl<'s> Engine<'s> {
             reason: Some(serde_json::json!({
                 "exit": kind, "price": price, "entry": trade.entry, "stop": trade.stop,
                 "take_profit": trade.take_profit, "direction": trade.direction,
+            })),
+        });
+        self.execute(instrument, bar.ts, price, 0.0, out)
+    }
+
+    /// The crash stop (`[stops] crash_pct`): a position whose price moved `crash_pct` against it
+    /// from the previous close is closed at that level (at the open if it gapped through).
+    fn check_crash(
+        &mut self,
+        instrument: &InstrumentId,
+        bar: &Bar,
+        out: &mut Vec<Event>,
+    ) -> Result<(), EngineError> {
+        let pct = self.cfg.stops.crash_pct;
+        let qty = self.portfolio.position(instrument);
+        let Some(prev) = self.last_close.get(instrument).copied() else {
+            return Ok(());
+        };
+        if pct <= 0.0 || qty.abs() <= f64::EPSILON || prev <= 0.0 {
+            return Ok(());
+        }
+        let price = if qty > 0.0 {
+            let level = prev * (1.0 - pct);
+            (bar.low <= level).then(|| bar.open.min(level))
+        } else {
+            let level = prev * (1.0 + pct);
+            (bar.high >= level).then(|| bar.open.max(level))
+        };
+        let Some(price) = price else {
+            return Ok(());
+        };
+        self.trades.remove(instrument);
+        self.pending.remove(instrument);
+        self.current.insert(instrument.clone(), 0.0);
+        self.release_manual(instrument);
+        out.push(Event::Signal {
+            ts: bar.ts,
+            instrument: instrument.clone(),
+            strategy: "stops".into(),
+            target: 0.0,
+            reason: Some(serde_json::json!({
+                "exit": "crash", "price": price, "previous_close": prev, "crash_pct": pct,
             })),
         });
         self.execute(instrument, bar.ts, price, 0.0, out)
