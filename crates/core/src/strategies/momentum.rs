@@ -99,6 +99,9 @@ fn momentum(closes: &VecDeque<f64>, lookback: usize) -> Option<f64> {
 #[derive(Debug, Clone)]
 pub struct TrendMomentum {
     lookback: usize,
+    /// When set, the signal is the share of these lookbacks with a positive return (an
+    /// ensemble, R-2) instead of the sign over `lookback`.
+    lookbacks: Vec<usize>,
     sizing: VolTarget,
     short: bool,
     closes: VecDeque<f64>,
@@ -109,11 +112,47 @@ impl TrendMomentum {
     pub fn new(lookback: usize, sizing: VolTarget) -> Self {
         Self {
             lookback: lookback.max(1),
+            lookbacks: Vec::new(),
             sizing,
             short: false,
             closes: VecDeque::new(),
             held: None,
         }
+    }
+
+    /// Average the trend over several lookbacks (each `>= 1`): the position is the share of
+    /// them with a positive return (minus the share negative, with shorts).
+    #[must_use]
+    pub fn with_lookbacks(mut self, lookbacks: &[usize]) -> Self {
+        self.lookbacks = lookbacks.iter().copied().filter(|l| *l >= 1).collect();
+        self
+    }
+
+    /// The trend signal in `-1..=1` (`0..=1` without shorts); `None` before any lookback is
+    /// known.
+    fn signal(&self) -> Option<f64> {
+        if self.lookbacks.is_empty() {
+            let m = momentum(&self.closes, self.lookback)?;
+            return Some(if m > 0.0 {
+                1.0
+            } else if self.short && m < 0.0 {
+                -1.0
+            } else {
+                0.0
+            });
+        }
+        let known: Vec<f64> = self
+            .lookbacks
+            .iter()
+            .filter_map(|l| momentum(&self.closes, *l))
+            .collect();
+        if known.is_empty() {
+            return None;
+        }
+        let up = known.iter().filter(|m| **m > 0.0).count() as f64;
+        let down = known.iter().filter(|m| **m < 0.0).count() as f64;
+        let n = known.len() as f64;
+        Some(if self.short { (up - down) / n } else { up / n })
     }
 
     /// Also hold a short while the trend is down.
@@ -130,15 +169,14 @@ impl Strategy for TrendMomentum {
     }
 
     fn on_bar(&mut self, _instrument: &InstrumentId, bar: &Bar) -> Option<f64> {
-        let cap = self.lookback.max(self.sizing.vol_bars) + 1;
+        let longest = self.lookbacks.iter().copied().max().unwrap_or(0);
+        let cap = self.lookback.max(longest).max(self.sizing.vol_bars) + 1;
         push_close(&mut self.closes, bar.close, cap);
-        let trend = momentum(&self.closes, self.lookback)?;
-        let next = if trend > 0.0 {
-            self.sizing.scale(&self.closes)
-        } else if self.short && trend < 0.0 {
-            -self.sizing.scale(&self.closes)
-        } else {
+        let signal = self.signal()?;
+        let next = if signal == 0.0 {
             0.0
+        } else {
+            signal * self.sizing.scale(&self.closes)
         };
         let target = self.sizing.banded(self.held, next)?;
         self.held = Some(target);
