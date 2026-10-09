@@ -376,4 +376,49 @@ mod tests {
         let spot = run(&mut BuyAndHold::default(), &[series("SPOT", &flat)], &cfg);
         assert!(spot.funding.abs() < f64::EPSILON, "no funding on spot");
     }
+
+    #[test]
+    fn the_crash_stop_exits_at_its_level_or_at_a_gapping_open() {
+        use chrono::{Duration, TimeZone};
+        let day = |i: i64, open: f64, low: f64, close: f64| Bar {
+            ts: Utc.timestamp_opt(0, 0).single().expect("ts") + Duration::days(i),
+            open,
+            high: open.max(close),
+            low,
+            close,
+            volume: 1.0,
+        };
+        let run_with = |bars: Vec<Bar>| {
+            let id = InstrumentId::spot("test", "A").expect("id");
+            let mut cfg = BacktestConfig {
+                fee_rate: 0.0,
+                slippage_bps: 0.0,
+                ..BacktestConfig::default()
+            };
+            cfg.stops.crash_pct = 0.1;
+            run(&mut BuyAndHold::default(), &[Series::new(id, bars)], &cfg)
+        };
+        // Bought at 100; the next day trades down to 85: out at 90 (10% below the close).
+        let intraday = run_with(vec![
+            day(0, 100.0, 100.0, 100.0),
+            day(1, 100.0, 100.0, 100.0),
+            day(2, 98.0, 85.0, 95.0),
+            day(3, 96.0, 96.0, 97.0),
+        ]);
+        let exit = intraday.fills.last().expect("exit");
+        assert_eq!(exit.side, crate::types::Side::Sell);
+        assert!((exit.price - 90.0).abs() < 1e-9, "{}", exit.price);
+        assert_eq!(
+            intraday.fills.len(),
+            2,
+            "stays out while the strategy is unchanged"
+        );
+        // A gap opening at 80 fills at the open, below the level.
+        let gap = run_with(vec![
+            day(0, 100.0, 100.0, 100.0),
+            day(1, 100.0, 100.0, 100.0),
+            day(2, 80.0, 78.0, 82.0),
+        ]);
+        assert!((gap.fills.last().expect("exit").price - 80.0).abs() < 1e-9);
+    }
 }
