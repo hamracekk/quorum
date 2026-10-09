@@ -170,7 +170,12 @@ impl<'s> Engine<'s> {
             strategy,
             cfg,
             measure_from,
-            portfolio: Portfolio::new(cfg.initial_cash),
+            portfolio: if cfg.risk.allow_short {
+                Portfolio::new(cfg.initial_cash)
+            } else {
+                // Long-only is a spot account: no buying on credit.
+                Portfolio::new(cfg.initial_cash).spot(cfg.fee_rate + cfg.slippage_bps / 10_000.0)
+            },
             broker,
             orders: OrderBook::default(),
             risk: RiskManager::new(cfg.risk),

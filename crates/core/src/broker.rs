@@ -152,6 +152,9 @@ pub struct Portfolio {
     positions: BTreeMap<InstrumentId, f64>,
     marks: BTreeMap<InstrumentId, f64>,
     min_notional: f64,
+    /// Spot account: buys never spend more than the cash on hand (this is the cost buffer per
+    /// unit of notional — fee and slippage). `None`: a margin account (shorts allowed).
+    cash_limit: Option<f64>,
 }
 
 impl Portfolio {
@@ -161,7 +164,16 @@ impl Portfolio {
             positions: BTreeMap::new(),
             marks: BTreeMap::new(),
             min_notional: 1.0,
+            cash_limit: None,
         }
+    }
+
+    /// Make this a spot account: a buy is capped at the cash on hand, allowing `cost` (fee and
+    /// slippage per unit of notional) on top.
+    #[must_use]
+    pub const fn spot(mut self, cost: f64) -> Self {
+        self.cash_limit = Some(cost);
+        self
     }
 
     pub const fn cash(&self) -> f64 {
@@ -214,7 +226,14 @@ impl Portfolio {
         } else {
             0.0
         };
-        let delta = target_qty - self.position(instrument);
+        let mut delta = target_qty - self.position(instrument);
+        if let Some(cost) = self.cash_limit
+            && delta > 0.0
+            && price > 0.0
+        {
+            // No borrowing on a spot account: what cash can pay for, fees included.
+            delta = delta.min(self.cash.max(0.0) / (price * (1.0 + cost)));
+        }
         if (delta * price).abs() < self.min_notional {
             return None;
         }
@@ -312,6 +331,19 @@ mod tests {
     fn tiny_changes_are_skipped() {
         let mut p = Portfolio::new(1_000.0);
         assert!(p.order_for(&id("A"), 100.0, 0.0005).is_none());
+    }
+
+    #[test]
+    fn a_spot_account_never_buys_on_credit() {
+        let mut spot = Portfolio::new(100.0).spot(0.01);
+        let (_, qty) = spot.order_for(&id("A"), 1.0, 3.0).expect("buy");
+        assert!(
+            (qty - 100.0 / 1.01).abs() < 1e-9,
+            "capped at cash, fees included: {qty}"
+        );
+        let mut margin = Portfolio::new(100.0);
+        let (_, qty) = margin.order_for(&id("A"), 1.0, 3.0).expect("buy");
+        assert!((qty - 300.0).abs() < 1e-9, "a margin account may borrow");
     }
 
     #[test]

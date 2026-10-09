@@ -5,6 +5,7 @@ mod momentum;
 mod per_instrument;
 mod signal_follower;
 mod sma_cross;
+mod universe;
 
 pub use buy_and_hold::BuyAndHold;
 pub use ensemble::{Ensemble, EnsembleConfig, SourceWeight};
@@ -13,3 +14,4 @@ pub use momentum::{TrendMomentum, VolTarget, XsMomentum};
 pub use per_instrument::PerInstrument;
 pub use signal_follower::SignalFollower;
 pub use sma_cross::{Sma, SmaCross};
+pub use universe::{TopVolume, UniverseRule};
