@@ -41,6 +41,35 @@ impl BinanceSpot {
         })
     }
 
+    /// Every spot pair quoted in USDT that is trading now, excluding stablecoins, fiat and
+    /// leveraged tokens (candidates for a point-in-time universe, S-3).
+    pub async fn usdt_pairs(&self) -> Result<Vec<String>> {
+        let body: Value = self
+            .client
+            .get(format!("{}/api/v3/exchangeInfo", self.base_url))
+            .query(&[("permissions", "SPOT")])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        let mut pairs: Vec<String> = body["symbols"]
+            .as_array()
+            .ok_or_else(|| DataError::Malformed("exchangeInfo without symbols".into()))?
+            .iter()
+            .filter(|s| s["status"] == "TRADING" && s["quoteAsset"] == "USDT")
+            .filter_map(|s| {
+                let base = s["baseAsset"].as_str()?;
+                let symbol = s["symbol"].as_str()?;
+                // Plain ASCII symbols only (Binance lists a few in other scripts).
+                let plain = symbol.chars().all(|c| c.is_ascii_alphanumeric());
+                (plain && is_candidate(base)).then(|| symbol.to_owned())
+            })
+            .collect();
+        pairs.sort();
+        Ok(pairs)
+    }
+
     /// Page through klines; drops bars still forming and bars at or after `end`.
     async fn klines(
         &self,
@@ -125,6 +154,16 @@ impl MarketData for BinanceSpot {
             .await
             .map_err(|e| PortError::adapter(format!("binance klines for {instrument}"), e))
     }
+}
+
+/// Whether a base asset belongs in a crypto universe: not a stablecoin, fiat or gold token.
+/// (Binance's leveraged tokens were delisted in 2024, so none trade any more.)
+pub fn is_candidate(base: &str) -> bool {
+    const EXCLUDED: [&str; 16] = [
+        "USDC", "BUSD", "TUSD", "FDUSD", "USDP", "DAI", "UST", "USTC", "EUR", "GBP", "AUD", "TRY",
+        "BRL", "AEUR", "PAXG", "XUSD",
+    ];
+    !EXCLUDED.contains(&base) && !base.starts_with("USD")
 }
 
 fn int_field(row: &[Value], i: usize) -> Result<i64> {
