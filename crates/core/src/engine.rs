@@ -139,6 +139,10 @@ pub struct Engine<'s> {
     stamp_returns: Vec<f64>,
     /// The latest measured close per instrument (the crash stop's reference).
     last_close: BTreeMap<InstrumentId, f64>,
+    /// Timestamps in a row without a bar, per held instrument (delisting, R-1).
+    missed: BTreeMap<InstrumentId, usize>,
+    /// Instruments with a bar in the current timestamp.
+    seen: std::collections::BTreeSet<InstrumentId>,
     /// Perpetual funding still to settle, per instrument, oldest first.
     funding: BTreeMap<InstrumentId, std::collections::VecDeque<FundingPoint>>,
     /// Net funding paid so far (negative: received).
@@ -199,6 +203,8 @@ impl<'s> Engine<'s> {
             funding: BTreeMap::new(),
             funding_paid: 0.0,
             last_close: BTreeMap::new(),
+            missed: BTreeMap::new(),
+            seen: std::collections::BTreeSet::new(),
         }
     }
 
@@ -227,6 +233,8 @@ impl<'s> Engine<'s> {
             _ => {}
         }
         self.open_ts = Some(bar.ts);
+        self.seen.insert(instrument.clone());
+        self.missed.remove(instrument);
         self.drain(&mut out)?;
 
         if self.measuring(bar.ts) {
@@ -748,7 +756,50 @@ impl<'s> Engine<'s> {
         self.measure_from.is_none_or(|start| ts >= start)
     }
 
+    /// Sell positions in instruments that stopped trading (`[stops] stale_bars` timestamps in a
+    /// row without a bar) at their last close less the haircut.
+    fn exit_delisted(&mut self, ts: DateTime<Utc>, out: &mut Vec<Event>) {
+        let rules = self.cfg.stops;
+        let seen = std::mem::take(&mut self.seen);
+        if rules.stale_bars == 0 || !self.measuring(ts) {
+            return;
+        }
+        let held: Vec<InstrumentId> = self
+            .portfolio
+            .positions()
+            .filter(|(id, qty)| qty.abs() > f64::EPSILON && !seen.contains(*id))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for instrument in held {
+            let missed = self.missed.entry(instrument.clone()).or_default();
+            *missed += 1;
+            if *missed < rules.stale_bars {
+                continue;
+            }
+            let Some(last) = self.last_close.get(&instrument).copied() else {
+                continue;
+            };
+            let price = last * (1.0 - rules.stale_haircut.clamp(0.0, 1.0));
+            self.trades.remove(&instrument);
+            self.pending.remove(&instrument);
+            self.current.insert(instrument.clone(), 0.0);
+            out.push(Event::Signal {
+                ts,
+                instrument: instrument.clone(),
+                strategy: "stops".into(),
+                target: 0.0,
+                reason: Some(serde_json::json!({
+                    "exit": "delisted", "last_close": last, "haircut": rules.stale_haircut,
+                })),
+            });
+            if let Err(err) = self.execute(&instrument, ts, price, 0.0, out) {
+                tracing::warn!(%instrument, error = %err, "delisted position not sold");
+            }
+        }
+    }
+
     fn close_timestamp(&mut self, ts: DateTime<Utc>, out: &mut Vec<Event>) {
+        self.exit_delisted(ts, out);
         if !self.stamp_returns.is_empty() {
             let mean = self.stamp_returns.iter().sum::<f64>() / self.stamp_returns.len() as f64;
             self.risk.observe_market(mean);

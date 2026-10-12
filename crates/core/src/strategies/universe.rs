@@ -36,6 +36,8 @@ pub struct TopVolume {
     rule: UniverseRule,
     volumes: BTreeMap<InstrumentId, VecDeque<f64>>,
     bars: BTreeMap<InstrumentId, usize>,
+    /// The timestamp index each instrument last traded at (a stopped one cannot rank).
+    seen: BTreeMap<InstrumentId, usize>,
     current: Option<DateTime<Utc>>,
     stamps: usize,
     members: BTreeSet<InstrumentId>,
@@ -57,6 +59,7 @@ impl TopVolume {
             },
             volumes: BTreeMap::new(),
             bars: BTreeMap::new(),
+            seen: BTreeMap::new(),
             current: None,
             stamps: 0,
             members: BTreeSet::new(),
@@ -75,6 +78,8 @@ impl TopVolume {
             .volumes
             .iter()
             .filter(|(id, _)| self.bars.get(*id).copied().unwrap_or(0) >= self.rule.min_history)
+            // Traded in the timestamp just completed: delisted coins drop out.
+            .filter(|(id, _)| self.seen.get(*id).is_some_and(|s| s + 1 >= self.stamps))
             .map(|(id, v)| (id, v.iter().sum::<f64>() / v.len().max(1) as f64))
             .collect();
         scored.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
@@ -108,6 +113,7 @@ impl Strategy for TopVolume {
             volume.pop_front();
         }
         *self.bars.entry(instrument.clone()).or_default() += 1;
+        self.seen.insert(instrument.clone(), self.stamps);
         if let Some(target) = self.inner.on_bar(instrument, bar) {
             self.desired.insert(instrument.clone(), target);
         }

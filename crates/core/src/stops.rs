@@ -40,6 +40,11 @@ pub struct StopRules {
     /// whose price rises as much), filled at that level — or at the open on a gap — like a stop
     /// order resting at the exchange. `0` = off. Independent of the other rules.
     pub crash_pct: f64,
+    /// A held instrument with no bar for this many timestamps is treated as delisted and sold at
+    /// its last close less `stale_haircut` (R-1). `0` = off.
+    pub stale_bars: usize,
+    /// Fraction knocked off the last close when a delisted position is sold.
+    pub stale_haircut: f64,
 }
 
 impl Default for StopRules {
@@ -53,6 +58,8 @@ impl Default for StopRules {
             risk_per_trade: 0.0,
             cooldown_bars: 0,
             crash_pct: 0.0,
+            stale_bars: 0,
+            stale_haircut: 0.0,
         }
     }
 }

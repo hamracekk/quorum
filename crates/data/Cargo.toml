@@ -24,6 +24,7 @@ tokio-stream.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
 trader-core.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 wiremock.workspace = true
