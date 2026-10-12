@@ -86,20 +86,33 @@ pub fn normal_quantile(p: f64) -> f64 {
 /// `sharpe` and `sharpes` are annualised; `years` is the length of the record behind them and
 /// `periods_per_year` the bars per year (365 for daily bars).
 pub fn deflated_sharpe(sharpe: f64, sharpes: &[f64], years: f64, periods_per_year: f64) -> f64 {
-    let n = sharpes.len();
+    deflated_sharpe_trials(sharpe, sharpes, sharpes.len(), years, periods_per_year)
+}
+
+/// [`deflated_sharpe`] when more settings were tried than `sharpes` holds (e.g. contenders
+/// already retired): their spread comes from `sharpes`, their number is `trials`.
+pub fn deflated_sharpe_trials(
+    sharpe: f64,
+    sharpes: &[f64],
+    trials: usize,
+    years: f64,
+    periods_per_year: f64,
+) -> f64 {
+    let n = trials.max(sharpes.len());
     let periods = years * periods_per_year;
-    if n == 0 || periods < 2.0 || periods_per_year <= 0.0 {
+    if sharpes.is_empty() || periods < 2.0 || periods_per_year <= 0.0 {
         return 0.0;
     }
     let per = |s: f64| s / periods_per_year.sqrt();
     let observed = per(sharpe);
-    let mean = sharpes.iter().map(|s| per(*s)).sum::<f64>() / n as f64;
-    let variance = if n > 1 {
+    let count = sharpes.len();
+    let mean = sharpes.iter().map(|s| per(*s)).sum::<f64>() / count as f64;
+    let variance = if count > 1 {
         sharpes
             .iter()
             .map(|s| (per(*s) - mean).powi(2))
             .sum::<f64>()
-            / (n as f64 - 1.0)
+            / (count as f64 - 1.0)
     } else {
         0.0
     };
