@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt;
 
 use chrono::{DateTime, Utc};
@@ -48,4 +49,8 @@ pub trait Strategy: fmt::Debug + Send {
 
     /// New external calls (live news readings and the like). Ignored by default.
     fn inform(&mut self, _calls: &[ExternalCall]) {}
+
+    /// The instruments currently tradable (a point-in-time universe re-ranked them). Strategies
+    /// that rank instruments against each other choose only among these; ignored by default.
+    fn set_universe(&mut self, _members: &BTreeSet<InstrumentId>) {}
 }

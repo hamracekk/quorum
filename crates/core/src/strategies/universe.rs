@@ -6,7 +6,8 @@
 //! timestamps, so the ranking never depends on feed order — and admits the top `size` among those
 //! with at least `min_history` bars. The inner strategy sees every bar (its indicators stay warm)
 //! and should size for `size` instruments; a target for a non-member is replaced by 0, and an
-//! instrument that joins gets the inner strategy's current target.
+//! instrument that joins gets the inner strategy's current target. The members are also handed to
+//! the inner strategy ([`Strategy::set_universe`]), so a ranking strategy chooses among them.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -102,6 +103,7 @@ impl Strategy for TopVolume {
             if self.current.is_some() {
                 if self.stamps.is_multiple_of(self.rule.refresh) {
                     self.rank();
+                    self.inner.set_universe(&self.members);
                 }
                 self.stamps += 1;
             }

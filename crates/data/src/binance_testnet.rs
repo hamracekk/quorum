@@ -215,6 +215,10 @@ impl BinanceTestnet {
             .send()
             .await?;
         let status = response.status();
+        // Binance: a 5xx means the request may or may not have been executed.
+        if status.is_server_error() {
+            return Err(DataError::Uncertain(format!("testnet {status}")));
+        }
         let body: Value = response.json().await?;
         if status.is_success() {
             return Ok(body);

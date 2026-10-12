@@ -13,7 +13,7 @@
 //! held weight unless it moved by more than that fraction, so daily volatility noise does not
 //! turn into fees.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use chrono::{DateTime, Utc};
 
@@ -37,7 +37,7 @@ pub struct VolTarget {
 impl VolTarget {
     /// The scale for a holding with recent closes `closes` (newest last); `1` without a target
     /// or before `vol_bars` returns are known.
-    fn scale(&self, closes: &VecDeque<f64>) -> f64 {
+    pub(super) fn scale(&self, closes: &VecDeque<f64>) -> f64 {
         if self.target_vol <= 0.0 || closes.len() <= self.vol_bars {
             return 1.0;
         }
@@ -67,7 +67,7 @@ impl VolTarget {
 
     /// `next` unless it is within `band` of `held` on the same side (entries, exits and
     /// flips always pass).
-    fn banded(&self, held: Option<f64>, next: f64) -> Option<f64> {
+    pub(super) fn banded(&self, held: Option<f64>, next: f64) -> Option<f64> {
         match held {
             Some(h) if h * next > 0.0 && ((next - h).abs() / h.abs()) <= self.band => None,
             Some(h) if (h - next).abs() < f64::EPSILON => None,
@@ -211,6 +211,8 @@ pub struct XsMomentum {
     chosen: BTreeMap<InstrumentId, f64>,
     ranked: bool,
     held: BTreeMap<InstrumentId, f64>,
+    /// Instruments it may choose from (`None` = all).
+    universe: Option<BTreeSet<InstrumentId>>,
 }
 
 impl XsMomentum {
@@ -226,6 +228,7 @@ impl XsMomentum {
             chosen: BTreeMap::new(),
             ranked: false,
             held: BTreeMap::new(),
+            universe: None,
         }
     }
 
@@ -233,6 +236,7 @@ impl XsMomentum {
         let mut scored: Vec<(&InstrumentId, f64)> = self
             .closes
             .iter()
+            .filter(|(id, _)| self.universe.as_ref().is_none_or(|u| u.contains(*id)))
             .filter_map(|(id, closes)| Some((id, momentum(closes, self.lookback)?)))
             .filter(|(_, m)| *m > 0.0)
             .collect();
@@ -281,6 +285,10 @@ impl Strategy for XsMomentum {
             .banded(self.held.get(instrument).copied(), next)?;
         self.held.insert(instrument.clone(), target);
         Some(target)
+    }
+
+    fn set_universe(&mut self, members: &BTreeSet<InstrumentId>) {
+        self.universe = Some(members.clone());
     }
 
     fn explain(&self, instrument: &InstrumentId) -> Option<serde_json::Value> {

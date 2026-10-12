@@ -7,6 +7,10 @@ pub enum DataError {
     Http(#[from] reqwest::Error),
     #[error("unexpected exchange response: {0}")]
     Malformed(String),
+    /// The venue answered, but its answer leaves the outcome unknown (an order may or may not
+    /// exist): look it up before retrying.
+    #[error("outcome unknown: {0}")]
+    Uncertain(String),
     #[error("invalid interval `{0}`: use letters and digits only, e.g. 1h")]
     InvalidInterval(String),
     #[error("I/O error on {path}: {source}")]
