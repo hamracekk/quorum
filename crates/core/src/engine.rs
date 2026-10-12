@@ -160,7 +160,7 @@ impl<'s> Engine<'s> {
         universe: &[InstrumentId],
         measure_from: Option<DateTime<Utc>>,
     ) -> Self {
-        let broker = PaperBroker::new(cfg.fee_rate, cfg.slippage_bps);
+        let broker = PaperBroker::new(cfg.fee_rate, cfg.slippage_bps).with_impact(cfg.impact);
         Self::with_broker(strategy, cfg, universe, measure_from, Box::new(broker))
     }
 
@@ -251,6 +251,8 @@ impl<'s> Engine<'s> {
             self.benchmark.observe(instrument, bar);
         }
         self.observe_bar(instrument, bar);
+        // Known from this bar's close on: the next fills are sized against it.
+        self.broker.liquidity(instrument, bar.close * bar.volume);
 
         if self.killed {
             return Ok(out);
@@ -946,6 +948,7 @@ mod tests {
             initial_cash: 1_000.0,
             fee_rate: 0.0,
             slippage_bps: 0.0,
+            impact: 0.0,
             risk: RiskLimits {
                 max_daily_loss: 1.0,
                 ..RiskLimits::default()
