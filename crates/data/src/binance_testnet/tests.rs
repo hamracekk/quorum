@@ -60,6 +60,7 @@ fn btc_rules() -> SymbolRules {
         step_size: 0.000_01,
         min_qty: 0.000_01,
         min_notional: 5.0,
+        tick_size: 0.01,
     }
 }
 
