@@ -130,3 +130,23 @@ fn an_ensemble_holds_the_share_of_lookbacks_that_are_rising() {
     let last = targets[5].expect("changed");
     assert!((last - 2.0 / 3.0).abs() < 1e-12, "two of three up: {last}");
 }
+
+#[test]
+fn cross_sectional_momentum_chooses_only_among_universe_members() {
+    let mut s = XsMomentum::new(3, 1, 1, PLAIN);
+    s.set_universe(&BTreeSet::from([id("SLOW")]));
+    let mut last = BTreeMap::new();
+    for day in 0..8_i32 {
+        for (symbol, growth) in [("FAST", 1.10_f64), ("SLOW", 1.01)] {
+            if let Some(t) = s.on_bar(&id(symbol), &bar(day, 10.0 * growth.powi(day))) {
+                last.insert(symbol, t);
+            }
+        }
+    }
+    assert_eq!(
+        last.get("SLOW"),
+        Some(&1.0),
+        "the strongest member: {last:?}"
+    );
+    assert_ne!(last.get("FAST"), Some(&1.0), "not a member");
+}
