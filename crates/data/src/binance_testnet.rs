@@ -46,6 +46,9 @@ pub struct SymbolRules {
     pub min_qty: f64,
     /// Smallest order value in the quote asset.
     pub min_notional: f64,
+    /// Price increment (`PRICE_FILTER`); `0` when unknown.
+    #[serde(default)]
+    pub tick_size: f64,
 }
 
 impl SymbolRules {
@@ -57,6 +60,18 @@ impl SymbolRules {
         // A small epsilon keeps 0.3 / 0.1 from rounding down to 2 steps.
         let steps = (qty / self.step_size + 1e-9).floor();
         steps * self.step_size
+    }
+
+    /// `price` rounded down to the tick size and printed with its decimals.
+    pub fn format_price(&self, price: f64) -> String {
+        if self.tick_size <= 0.0 {
+            return format!("{price:.8}");
+        }
+        let steps = (price / self.tick_size + 1e-9).floor();
+        let decimals = format!("{}", self.tick_size)
+            .split_once('.')
+            .map_or(0, |(_, d)| d.trim_end_matches('0').len());
+        format!("{:.decimals$}", steps * self.tick_size)
     }
 
     /// `qty` as the exchange expects it: at most as many decimals as the step size has.
@@ -277,6 +292,46 @@ impl BinanceTestnet {
         parse_order(&self.send(self.client.post(url)).await?)
     }
 
+    /// Rest a stop-loss-limit sell of `qty` at the exchange: when the price trades at `stop`, a
+    /// limit order at `limit` is placed — it works while this app is offline (S-4).
+    pub async fn stop_loss(
+        &self,
+        symbol: &str,
+        qty: &str,
+        stop: &str,
+        limit: &str,
+        client_id: &str,
+    ) -> Result<OrderResult> {
+        let query = self.signed_query(&[
+            ("symbol", symbol.to_owned()),
+            ("side", "SELL".to_owned()),
+            ("type", "STOP_LOSS_LIMIT".to_owned()),
+            ("timeInForce", "GTC".to_owned()),
+            ("quantity", qty.to_owned()),
+            ("price", limit.to_owned()),
+            ("stopPrice", stop.to_owned()),
+            ("newClientOrderId", client_id.to_owned()),
+            ("newOrderRespType", "RESULT".to_owned()),
+        ]);
+        let url = format!("{}/api/v3/order?{query}", self.base_url);
+        parse_order(&self.send(self.client.post(url)).await?)
+    }
+
+    /// Cancel the order tagged `client_id`; `None` when the exchange no longer has it open.
+    pub async fn cancel(&self, symbol: &str, client_id: &str) -> Result<Option<OrderResult>> {
+        let query = self.signed_query(&[
+            ("symbol", symbol.to_owned()),
+            ("origClientOrderId", client_id.to_owned()),
+        ]);
+        let url = format!("{}/api/v3/order?{query}", self.base_url);
+        match self.send(self.client.delete(url)).await {
+            Ok(body) => parse_order(&body).map(Some),
+            // -2011: unknown order (filled, cancelled or never placed).
+            Err(DataError::Malformed(msg)) if msg.contains("-2011") => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     /// The order tagged `client_id`, if the exchange knows it (to resolve an uncertain submit).
     pub async fn order(&self, symbol: &str, client_id: &str) -> Result<Option<OrderResult>> {
         let params = [
@@ -320,6 +375,10 @@ fn parse_rules(symbol: &Value) -> Result<SymbolRules> {
         Some(f) => number(&f["minNotional"])?,
         None => 0.0,
     };
+    let tick_size = match filter("PRICE_FILTER") {
+        Some(f) => number(&f["tickSize"])?,
+        None => 0.0,
+    };
     Ok(SymbolRules {
         symbol: text(symbol, "symbol")?,
         base_asset: text(symbol, "baseAsset")?,
@@ -327,6 +386,7 @@ fn parse_rules(symbol: &Value) -> Result<SymbolRules> {
         step_size: number(&lot["stepSize"])?,
         min_qty: number(&lot["minQty"])?,
         min_notional,
+        tick_size,
     })
 }
 
