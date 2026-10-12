@@ -16,6 +16,9 @@ pub struct BacktestConfig {
     /// Commission per trade as a fraction of notional (0.001 = 0.1%).
     pub fee_rate: f64,
     pub slippage_bps: f64,
+    /// Market impact (E-3): extra slippage of `impact × √(order notional / the instrument's
+    /// latest bar dollar volume)`, the square-root law; `0` = off.
+    pub impact: f64,
     pub risk: RiskLimits,
     /// Per-trade exits and risk-per-trade sizing (T-2); off by default.
     pub stops: StopRules,
@@ -30,6 +33,7 @@ impl Default for BacktestConfig {
             initial_cash: 10_000.0,
             fee_rate: 0.001,
             slippage_bps: 2.0,
+            impact: 0.0,
             risk: RiskLimits::default(),
             stops: StopRules::default(),
             perp_longs: true,
@@ -140,6 +144,7 @@ mod tests {
             initial_cash: 1_000.0,
             fee_rate: 0.0,
             slippage_bps: 0.0,
+            impact: 0.0,
             risk: RiskLimits {
                 max_daily_loss: 1.0,
                 ..RiskLimits::default()
@@ -164,6 +169,29 @@ mod tests {
 
         let expected = 1_000.0 / 105.0 * 120.0;
         assert!((result.report.end_equity - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn impact_is_sized_on_the_last_closed_bar() {
+        let mut data = [series(
+            "A",
+            &[(100.0, 100.0), (105.0, 110.0), (110.0, 120.0)],
+        )];
+        // 100M of dollar volume on the signal bar, none on the fill bar (unknown at its open).
+        data[0].bars[0].volume = 1_000_000.0;
+        data[0].bars[1].volume = 0.0;
+        let cfg = BacktestConfig {
+            impact: 0.1,
+            ..frictionless()
+        };
+        let result = run(&mut BuyAndHold::default(), &data, &cfg);
+        // Notional ≈ 1,000: 0.1 × √(1,000 / 100M) = 0.1%.
+        let expected = 105.0 * 0.1_f64.mul_add((1_000.0_f64 / 1e8).sqrt(), 1.0);
+        assert!(
+            (result.fills[0].price - expected).abs() < 1e-3,
+            "{:?}",
+            result.fills[0]
+        );
     }
 
     #[test]

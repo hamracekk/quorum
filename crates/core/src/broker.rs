@@ -31,6 +31,10 @@ pub trait Broker: fmt::Debug + Send {
     /// it; live adapters use the exchange's own prices and ignore it.
     fn quote(&mut self, _instrument: &InstrumentId, _ts: DateTime<Utc>, _price: f64) {}
 
+    /// Dollar volume of `instrument`'s latest closed bar. Simulated venues size market impact
+    /// from it; live adapters ignore it.
+    fn liquidity(&mut self, _instrument: &InstrumentId, _dollar_volume: f64) {}
+
     /// Hand over a new order (status `New`). An `Err` means the order never reached the
     /// venue; the engine records it as rejected. Venue-side refusals are reported through
     /// [`poll`](Self::poll) as [`ExecutionReport::Rejected`] instead.
@@ -45,12 +49,17 @@ pub trait Broker: fmt::Debug + Send {
 
 /// Simulated venue that fills market orders in full against the latest quote.
 ///
-/// Fills are worsened by a fixed slippage and charged a proportional fee. An order submitted
-/// before any quote for its instrument rests until the next quote.
+/// Fills are worsened by a fixed slippage plus, with [`with_impact`](Self::with_impact), market
+/// impact growing with the square root of the order's share of the latest bar's dollar volume
+/// (at most [`MAX_IMPACT`]), and charged a proportional fee. An order submitted before any quote
+/// for its instrument rests until the next quote.
 #[derive(Debug, Clone)]
 pub struct PaperBroker {
     fee_rate: f64,
     slippage: f64,
+    impact: f64,
+    /// Latest bar dollar volume per instrument.
+    volumes: BTreeMap<InstrumentId, f64>,
     quotes: BTreeMap<InstrumentId, f64>,
     resting: Vec<Order>,
     reports: Vec<ExecutionReport>,
@@ -61,16 +70,40 @@ impl PaperBroker {
         Self {
             fee_rate,
             slippage: slippage_bps / 10_000.0,
+            impact: 0.0,
+            volumes: BTreeMap::new(),
             quotes: BTreeMap::new(),
             resting: Vec::new(),
             reports: Vec::new(),
         }
     }
 
+    /// With market impact `impact` (see [`BacktestConfig`](crate::BacktestConfig)).
+    #[must_use]
+    pub const fn with_impact(mut self, impact: f64) -> Self {
+        self.impact = impact;
+        self
+    }
+
+    /// Extra slippage of an order of `notional` on `instrument`: unknown or zero volume pays the
+    /// maximum.
+    fn impact_of(&self, instrument: &InstrumentId, notional: f64) -> f64 {
+        if self.impact <= 0.0 {
+            return 0.0;
+        }
+        match self.volumes.get(instrument) {
+            Some(&volume) if volume > 0.0 => {
+                (self.impact * (notional / volume).sqrt()).min(MAX_IMPACT)
+            }
+            _ => MAX_IMPACT,
+        }
+    }
+
     fn execute(&mut self, order: &Order, ts: DateTime<Utc>, price: f64) {
+        let slip = self.slippage + self.impact_of(&order.instrument, order.qty * price);
         let exec_price = match order.side {
-            Side::Buy => price * (1.0 + self.slippage),
-            Side::Sell => price * (1.0 - self.slippage),
+            Side::Buy => price * (1.0 + slip),
+            Side::Sell => price * (1.0 - slip),
         };
         let fee = order.qty * exec_price * self.fee_rate;
         self.reports.push(ExecutionReport::Filled {
@@ -87,9 +120,16 @@ impl PaperBroker {
     }
 }
 
+/// The most market impact one fill pays (10%).
+pub const MAX_IMPACT: f64 = 0.1;
+
 impl Broker for PaperBroker {
     fn name(&self) -> &'static str {
         "paper"
+    }
+
+    fn liquidity(&mut self, instrument: &InstrumentId, dollar_volume: f64) {
+        self.volumes.insert(instrument.clone(), dollar_volume);
     }
 
     fn quote(&mut self, instrument: &InstrumentId, ts: DateTime<Utc>, price: f64) {
@@ -371,6 +411,40 @@ mod tests {
         let sell = trade(&mut p, &mut b, &id("A"), 100.0, 0.0).expect("sell");
         assert!((buy.price - 100.1).abs() < 1e-9);
         assert!((sell.price - 99.9).abs() < 1e-9);
+    }
+
+    #[test]
+    fn impact_grows_with_the_square_root_of_the_order_share() {
+        // 1,000 notional against 100,000 of volume: 1% share → 0.1 × √0.01 = 1%.
+        let (mut p, mut b) = (
+            Portfolio::new(1_000.0),
+            PaperBroker::new(0.0, 0.0).with_impact(0.1),
+        );
+        b.liquidity(&id("A"), 100_000.0);
+        let buy = trade(&mut p, &mut b, &id("A"), 100.0, 1.0).expect("buy");
+        assert!((buy.price - 101.0).abs() < 1e-9, "{}", buy.price);
+        // A quarter of the size pays half the impact.
+        let (mut p, mut b) = (
+            Portfolio::new(250.0),
+            PaperBroker::new(0.0, 0.0).with_impact(0.1),
+        );
+        b.liquidity(&id("A"), 100_000.0);
+        let small = trade(&mut p, &mut b, &id("A"), 100.0, 1.0).expect("buy");
+        assert!((small.price - 100.5).abs() < 1e-9, "{}", small.price);
+    }
+
+    #[test]
+    fn unknown_volume_pays_the_most_impact_and_off_pays_none() {
+        let (mut p, mut b) = (
+            Portfolio::new(1_000.0),
+            PaperBroker::new(0.0, 0.0).with_impact(0.1),
+        );
+        let sell = trade(&mut p, &mut b, &id("A"), 100.0, -1.0).expect("sell");
+        assert!((sell.price - 90.0).abs() < 1e-9, "10% at most");
+        let (mut p, mut b) = (Portfolio::new(1_000.0), PaperBroker::new(0.0, 0.0));
+        b.liquidity(&id("A"), 1.0);
+        let buy = trade(&mut p, &mut b, &id("A"), 100.0, 1.0).expect("buy");
+        assert!((buy.price - 100.0).abs() < 1e-9);
     }
 
     #[test]
