@@ -13,6 +13,7 @@ pub mod scoreboard;
 pub mod signals;
 mod sweep;
 pub mod tournament;
+pub mod validation;
 mod walk_forward;
 
 pub use error::LabError;
