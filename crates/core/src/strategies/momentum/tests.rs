@@ -113,3 +113,20 @@ fn with_shorts_a_falling_trend_is_held_short() {
     assert_eq!(targets[5], Some(-1.0), "10 < 12: short");
     assert_eq!(targets[6], None, "still short");
 }
+
+#[test]
+fn an_ensemble_holds_the_share_of_lookbacks_that_are_rising() {
+    let mut s = TrendMomentum::new(1, PLAIN).with_lookbacks(&[1, 2, 4]);
+    let a = id("A");
+    // Up for a while, then one down day: the 1-day trend turns, the longer ones do not.
+    let closes = [10.0, 11.0, 12.0, 13.0, 14.0, 13.5];
+    let targets: Vec<Option<f64>> = closes
+        .iter()
+        .zip(0_i32..)
+        .map(|(c, day)| s.on_bar(&a, &bar(day, *c)))
+        .collect();
+    let held = targets[..5].iter().rev().find_map(|t| *t);
+    assert_eq!(held, Some(1.0), "every lookback up");
+    let last = targets[5].expect("changed");
+    assert!((last - 2.0 / 3.0).abs() < 1e-12, "two of three up: {last}");
+}

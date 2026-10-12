@@ -421,4 +421,50 @@ mod tests {
         ]);
         assert!((gap.fills.last().expect("exit").price - 80.0).abs() < 1e-9);
     }
+
+    #[test]
+    fn a_coin_that_stops_trading_is_sold_at_its_last_close_less_the_haircut() {
+        use chrono::{Duration, TimeZone};
+        let day = |i: i64, close: f64| Bar {
+            ts: Utc.timestamp_opt(0, 0).single().expect("ts") + Duration::days(i),
+            open: close,
+            high: close,
+            low: close,
+            close,
+            volume: 1.0,
+        };
+        let live = InstrumentId::spot("test", "LIVE").expect("id");
+        let dead = InstrumentId::spot("test", "DEAD").expect("id");
+        let series = [
+            Series::new(live, (0..8).map(|i| day(i, 100.0)).collect()),
+            Series::new(dead, (0..3).map(|i| day(i, 50.0)).collect()),
+        ];
+        let mut cfg = BacktestConfig {
+            fee_rate: 0.0,
+            slippage_bps: 0.0,
+            ..BacktestConfig::default()
+        };
+        cfg.stops.stale_bars = 2;
+        cfg.stops.stale_haircut = 0.5;
+        let result = run(
+            &mut PerInstrument::new(BuyAndHold::default(), 2),
+            &series,
+            &cfg,
+        );
+        let sold = result
+            .fills
+            .iter()
+            .find(|f| f.instrument.symbol() == "DEAD" && f.side == crate::types::Side::Sell)
+            .expect("the dead coin is sold");
+        assert!(
+            (sold.price - 25.0).abs() < 1e-9,
+            "last close 50 less 50%: {}",
+            sold.price
+        );
+        let end = result.equity_curve.last().map_or(0.0, |p| p.equity);
+        assert!(
+            (end - 7_500.0).abs() < 1.0,
+            "half of the dead coin's value is lost: {end}"
+        );
+    }
 }
