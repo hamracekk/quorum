@@ -26,3 +26,12 @@ fn many_trials_deflate_the_same_sharpe() {
     let short = deflated_sharpe(2.0, &tried, 0.5, 365.0);
     assert!(long > 0.9 && short < long, "{short} vs {long}");
 }
+
+#[test]
+fn retired_trials_deflate_further() {
+    let seen = [0.2, 0.5, 0.8, 1.1];
+    let few = deflated_sharpe(1.2, &seen, 2.0, 365.0);
+    let many = deflated_sharpe_trials(1.2, &seen, 40, 2.0, 365.0);
+    assert!(many < few, "{many} vs {few}");
+    assert!((deflated_sharpe_trials(1.2, &seen, 2, 2.0, 365.0) - few).abs() < 1e-12);
+}

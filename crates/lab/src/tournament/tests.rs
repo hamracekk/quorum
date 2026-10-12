@@ -20,6 +20,14 @@ fn report(sharpe: f64, drawdown: f64, trades: usize, benchmark_sharpe: f64) -> R
     }
 }
 
+/// The rules without the deflated-Sharpe gate (tested on its own below).
+fn undeflated() -> Rules {
+    Rules {
+        min_deflated: 0.0,
+        ..Rules::default()
+    }
+}
+
 fn standing(id: &str, days: f64, record: Report, champion: Report, losses: u32) -> Standing {
     Standing {
         id: id.into(),
@@ -58,7 +66,7 @@ fn the_best_eligible_challenger_is_promoted_and_only_one() {
             ),
             standing("young", 10.0, report(3.0, 0.01, 30, 0.2), champion, 0),
         ],
-        Rules::default(),
+        undeflated(),
     );
     let promoted: Vec<&str> = actions
         .iter()
@@ -89,7 +97,7 @@ fn challengers_trailing_buy_and_hold_twice_in_a_row_are_retired() {
             champion.clone(),
             0,
         )],
-        Rules::default(),
+        undeflated(),
     );
     assert_eq!(
         first,
@@ -107,7 +115,7 @@ fn challengers_trailing_buy_and_hold_twice_in_a_row_are_retired() {
             champion.clone(),
             1,
         )],
-        Rules::default(),
+        undeflated(),
     );
     assert!(matches!(&second[0], Action::Retire { id, .. } if id == "weak"));
     // Inside the grace period nothing counts against it.
@@ -119,7 +127,47 @@ fn challengers_trailing_buy_and_hold_twice_in_a_row_are_retired() {
             champion,
             1,
         )],
-        Rules::default(),
+        undeflated(),
     );
     assert!(matches!(&fresh[0], Action::Keep { losses: 0, .. }));
+}
+
+#[test]
+fn a_short_lucky_record_among_many_tries_is_not_promoted() {
+    let champion = report(0.5, 0.10, 20, 0.2);
+    let field = |days: f64| -> Vec<Standing> {
+        let mut all = vec![standing(
+            "lucky",
+            days,
+            report(1.5, 0.08, 15, 0.2),
+            champion.clone(),
+            0,
+        )];
+        for (i, sharpe) in [0.4, 0.5, 0.6, 0.5].into_iter().enumerate() {
+            all.push(standing(
+                &format!("other{i}"),
+                days,
+                report(sharpe, 0.2, 15, 0.2),
+                champion.clone(),
+                0,
+            ));
+        }
+        all
+    };
+    let gated = Rules {
+        trials: 20,
+        ..Rules::default()
+    };
+    // Sharpe 1.5 over 30 days, best of 20 tries: within luck.
+    let actions = review(&field(30.0), gated);
+    assert!(
+        matches!(&actions[0], Action::Keep { reason, .. } if reason.contains("deflated")),
+        "{actions:?}"
+    );
+    // The same lead held for five years is real.
+    let actions = review(&field(1_825.0), gated);
+    assert!(matches!(&actions[0], Action::Promote { .. }), "{actions:?}");
+    // With the gate off, the short record is promoted as before.
+    let actions = review(&field(30.0), undeflated());
+    assert!(matches!(&actions[0], Action::Promote { .. }), "{actions:?}");
 }
