@@ -10,6 +10,8 @@ Implements the `core` ports; nothing outside this crate knows about Binance or P
 | `binance.rs` | `BinanceSpot`: async `MarketData` adapter for Binance spot klines (public REST, no key). Pages 1000 bars/request, drops still-forming bars, `end` exclusive, 200 ms between pages |
 | `binance_archive.rs` | R-1: Binance public data archive (data.binance.vision) — paged S3 listing of every spot symbol ever listed, monthly kline zips (CSV, ms or µs times) for delisted coins |
 | `binance_futures.rs` | E-2: `BinanceFutures`, public keyless USDT-perpetual funding-rate history (`/fapi/v1/fundingRate`), paged |
+| `binance_announcements.rs` | RB-4: Binance's public delisting announcements (CMS catalog 161), titles parsed to tickers only |
+| `quality.rs` | RB-6: data-quality checks — missing bars, impossible candles, non-positive prices, outlier moves, dead feeds |
 | `binance_testnet.rs` | T-7: `BinanceTestnet`, signed (HMAC-SHA256) spot client for **testnet only** — refuses every host but `testnet.binance.vision` (and loopback mocks in tests); account (permissions, balances), `exchangeInfo` rules (step size, min notional), market orders with a client id, order lookup; redacted credentials |
 | `binance_ws.rs` | `BinanceStream`: `MarketStream` over the public websocket; closed klines only; reconnect with exponential backoff (tested against a local websocket server) |
 | `store.rs` | `ParquetStore`: `BarStore` on Parquet; `read_parquet` / `write_parquet` (atomic temp-file + rename); `migrate_flat_layout` for M1 files |

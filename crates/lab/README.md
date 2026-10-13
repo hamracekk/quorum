@@ -13,6 +13,8 @@ loop here (M9).
 | `carry.rs` | ADR 0007: funding-carry simulation (long spot + short perpetual): coins whose trailing funding clears `min_annual`, equal notional, funding per print, both legs' costs, margin, 20% resize band; yearly returns; R-4 gate (four-leg cost hurdle, exit level), short-leg liquidation from bars, hold-out report |
 | `overfit.rs` | E-4: deflated Sharpe ratio (probability the best of many tried settings has a real edge), normal CDF and quantile |
 | `validation.rs` | R-3: probability of backtest overfitting (CSCV) and combinatorial purged cross-validation over each parameter set's full-history returns; run with every walk-forward |
+| `robustness.rs` | RB-2: seeded block bootstrap of an out-of-sample curve (CAGR, Sharpe, drawdown percentiles) and bull / bear / sideways splits by the benchmark's trailing quarter |
+| `parallel.rs` | `par_map`: an order-preserving parallel map over scoped threads (walk-forward windows, validation runs) |
 | `portfolio.rs` | ADR 0007 step 2: combine out-of-sample equity curves into one portfolio — daily returns aligned, fixed shares or capped inverse volatility from trailing data, rebalanced periodically; each stream alone and the correlation matrix |
 | `walk_forward.rs` | `walk_forward(...)`: rolling train/test windows, stitched out-of-sample `Report`; `walk_forward_with(...)` lets a parameter set also change the backtest config (per-trade stops chosen with the SMA pair) |
 | `signals.rs` | Event study: bias-signed forward returns (next open → close h bars later) per signal, baseline, net of costs, t-stat, in-sample vs out-of-sample, verdict |

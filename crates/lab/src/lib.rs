@@ -8,7 +8,9 @@
 pub mod carry;
 mod error;
 pub mod overfit;
+mod parallel;
 pub mod portfolio;
+pub mod robustness;
 pub mod scoreboard;
 pub mod signals;
 mod sweep;
@@ -17,6 +19,7 @@ pub mod validation;
 mod walk_forward;
 
 pub use error::LabError;
+pub use parallel::par_map;
 pub use sweep::{SweepRow, sweep};
 pub use walk_forward::{
     WalkForwardConfig, WalkForwardReport, Window, walk_forward, walk_forward_with,

@@ -241,13 +241,20 @@ pub enum ControlAction {
     TightenStop { stop: f64 },
     /// Close the position.
     Close,
+    /// Scale every paper target to this fraction (`0..=0.95`) for [`REDUCE_HOURS`] — a
+    /// market-wide hazard (exchange hack, stablecoin depeg, ban); can only lower exposure.
+    ReduceExposure { scale: f64 },
 }
+
+/// Hours a `reduce_exposure` control lasts (a watcher renews it while the hazard lasts).
+pub const REDUCE_HOURS: i64 = 24;
 
 impl ControlAction {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::TightenStop { .. } => "tighten_stop",
             Self::Close => "close",
+            Self::ReduceExposure { .. } => "reduce_exposure",
         }
     }
 }

@@ -125,6 +125,10 @@ pub struct RiskManager {
     /// warm-up included, for the volatility regime.
     returns: VecDeque<f64>,
     scale: f64,
+    /// A temporary cap on every target (`reduce_exposure`): the scale and until when.
+    cap: Option<(f64, DateTime<Utc>)>,
+    /// The latest closed timestamp.
+    now: Option<DateTime<Utc>>,
 }
 
 impl RiskManager {
@@ -139,6 +143,8 @@ impl RiskManager {
             drawdown: 0.0,
             returns: VecDeque::new(),
             scale: 1.0,
+            cap: None,
+            now: None,
         }
     }
 
@@ -195,7 +201,30 @@ impl RiskManager {
         self.scale
     }
 
+    /// Cap every target at `scale` until `until` (lower only: a looser cap never replaces a
+    /// tighter one that is still running).
+    pub fn cap(&mut self, scale: f64, until: DateTime<Utc>) {
+        let scale = scale.clamp(0.0, 1.0);
+        let running = self
+            .cap
+            .filter(|(_, end)| self.now.is_none_or(|now| now < *end));
+        self.cap = Some(match running {
+            Some((current, end)) if current <= scale => (current, end.max(until)),
+            _ => (scale, until),
+        });
+    }
+
+    /// The cap in force at the latest closed timestamp (`1` = none).
+    pub fn cap_scale(&self) -> f64 {
+        match (self.cap, self.now) {
+            (Some((scale, until)), Some(now)) if now < until => scale,
+            (Some((scale, _)), None) => scale,
+            _ => 1.0,
+        }
+    }
+
     pub fn update(&mut self, ts: DateTime<Utc>, equity: f64) {
+        self.now = Some(ts);
         let day = ts.date_naive();
         if self.day != Some(day) {
             self.day = Some(day);
@@ -236,9 +265,10 @@ impl RiskManager {
                 *target *= scale;
             }
         }
-        if self.scale < 1.0 {
+        let scale = self.scale * self.cap_scale();
+        if scale < 1.0 {
             for target in targets.values_mut() {
-                *target *= self.scale;
+                *target *= scale;
             }
         }
         targets
@@ -285,6 +315,20 @@ mod tests {
         let out = risk.apply(&targets(&[("A", 1.0), ("B", -1.0)]));
         assert_close(out[&id("A")], 0.5);
         assert_close(out[&id("B")], 0.0);
+    }
+
+    #[test]
+    fn a_cap_lowers_every_target_until_it_expires_and_never_loosens() {
+        let mut risk = RiskManager::new(RiskLimits::default());
+        let want = targets(&[("A", 0.4)]);
+        risk.update(at(0), 1_000.0);
+        risk.cap(0.5, at(24));
+        assert_close(risk.apply(&want)[&id("A")], 0.2);
+        risk.cap(0.8, at(48)); // looser: keeps 0.5, runs to the later end
+        risk.update(at(30), 1_000.0);
+        assert_close(risk.apply(&want)[&id("A")], 0.2);
+        risk.update(at(48), 1_000.0);
+        assert_close(risk.apply(&want)[&id("A")], 0.4);
     }
 
     #[test]

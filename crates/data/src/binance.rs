@@ -166,6 +166,20 @@ pub fn is_candidate(base: &str) -> bool {
     !EXCLUDED.contains(&base) && !base.starts_with("USD")
 }
 
+/// Whether `base` is one of Binance's leveraged tokens (BTCUP, ETHDOWN, BNBBULL, BEAR …).
+///
+/// They are decaying 3× products, not coins, all shut down — never universe members. `known`
+/// holds the other bases, so real coins ending in the same letters (JUP, SYRUP) are kept.
+pub fn is_leveraged_token(base: &str, known: &std::collections::BTreeSet<String>) -> bool {
+    if base == "BULL" || base == "BEAR" {
+        return true;
+    }
+    ["UP", "DOWN", "BULL", "BEAR"].iter().any(|suffix| {
+        base.strip_suffix(suffix)
+            .is_some_and(|coin| !coin.is_empty() && known.contains(coin))
+    })
+}
+
 fn int_field(row: &[Value], i: usize) -> Result<i64> {
     row.get(i)
         .and_then(Value::as_i64)
@@ -221,6 +235,22 @@ mod tests {
         let row = json!([0, "abc", "1", "1", "1", "1", 0]);
         let row = row.as_array().expect("array");
         assert!(matches!(parse_row(row), Err(DataError::Malformed(_))));
+    }
+
+    #[test]
+    fn leveraged_tokens_are_told_apart_from_real_coins() {
+        let known: std::collections::BTreeSet<String> = ["BTC", "ETH", "BNB", "J", "SYR"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+        for token in ["BTCUP", "ETHDOWN", "BNBBULL", "ETHBEAR", "BULL", "BEAR"] {
+            assert!(is_leveraged_token(token, &known), "{token}");
+        }
+        let without_parents: std::collections::BTreeSet<String> =
+            ["BTC", "ETH"].iter().map(|s| (*s).to_owned()).collect();
+        for coin in ["JUP", "SYRUP", "BTC", "SETUP"] {
+            assert!(!is_leveraged_token(coin, &without_parents), "{coin}");
+        }
     }
 
     #[tokio::test]

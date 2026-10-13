@@ -33,6 +33,9 @@ pub struct WalkForwardReport<P> {
     /// That stitched curve (for combining strategies); not sent to the dashboard.
     #[serde(skip)]
     pub curve: Vec<EquityPoint>,
+    /// Buy & hold over the same windows, stitched the same way.
+    #[serde(skip)]
+    pub benchmark_curve: Vec<EquityPoint>,
 }
 
 /// Rolling walk-forward evaluation.
@@ -41,9 +44,9 @@ pub struct WalkForwardReport<P> {
 /// then trade it on the next `test_bars` (with the training bars as indicator warm-up
 /// only). Windows advance by `test_bars`, so test periods never overlap and no test bar
 /// is ever used for choosing parameters.
-pub fn walk_forward<P: Clone>(
+pub fn walk_forward<P: Clone + Send + Sync>(
     grid: &[P],
-    factory: &impl StrategyFactory<P>,
+    factory: &(impl StrategyFactory<P> + Sync),
     series: &[Series],
     cfg: &BacktestConfig,
     wf: WalkForwardConfig,
@@ -55,10 +58,10 @@ pub fn walk_forward<P: Clone>(
 ///
 /// `configure` maps a parameter set and the base configuration to the configuration it is
 /// trained and tested with, e.g. per-trade stops chosen alongside the strategy's parameters.
-pub fn walk_forward_with<P: Clone>(
+pub fn walk_forward_with<P: Clone + Send + Sync>(
     grid: &[P],
-    factory: &impl StrategyFactory<P>,
-    configure: impl Fn(&P, &BacktestConfig) -> BacktestConfig,
+    factory: &(impl StrategyFactory<P> + Sync),
+    configure: impl Fn(&P, &BacktestConfig) -> BacktestConfig + Sync,
     series: &[Series],
     cfg: &BacktestConfig,
     wf: WalkForwardConfig,
@@ -78,43 +81,44 @@ pub fn walk_forward_with<P: Clone>(
         });
     }
 
-    let mut windows = Vec::new();
-    let mut results = Vec::new();
-    let mut start = 0;
-    while start + needed <= stamps.len() {
-        let train_start = stamps[start];
-        let test_start = stamps[start + wf.train_bars];
-        let test_end = stamps[start + needed - 1];
-        let after_test = stamps
-            .get(start + needed)
-            .copied()
-            .unwrap_or(DateTime::<Utc>::MAX_UTC);
+    // Windows are independent: run them across the cores, keep them in order.
+    let starts: Vec<usize> = (0..=stamps.len() - needed).step_by(wf.test_bars).collect();
+    let (windows, results): (Vec<Window<P>>, Vec<BacktestResult>) =
+        crate::par_map(&starts, |&start| {
+            let train_start = stamps[start];
+            let test_start = stamps[start + wf.train_bars];
+            let test_end = stamps[start + needed - 1];
+            let after_test = stamps
+                .get(start + needed)
+                .copied()
+                .unwrap_or(DateTime::<Utc>::MAX_UTC);
 
-        let train = slice_all(series, train_start, test_start);
-        let (params, train_sharpe) = best_params(grid, factory, &configure, &train, cfg);
+            let train = slice_all(series, train_start, test_start);
+            let (params, train_sharpe) = best_params(grid, factory, &configure, &train, cfg);
 
-        let full = slice_all(series, train_start, after_test);
-        let mut strategy = factory.build(&params);
-        let chosen = configure(&params, cfg);
-        let result = run_from(strategy.as_mut(), &full, &chosen, Some(test_start));
+            let full = slice_all(series, train_start, after_test);
+            let mut strategy = factory.build(&params);
+            let chosen = configure(&params, cfg);
+            let result = run_from(strategy.as_mut(), &full, &chosen, Some(test_start));
+            let window = Window {
+                train_start,
+                test_start,
+                test_end,
+                params,
+                train_sharpe,
+                test: result.report.clone(),
+            };
+            (window, result)
+        })
+        .into_iter()
+        .unzip();
 
-        windows.push(Window {
-            train_start,
-            test_start,
-            test_end,
-            params,
-            train_sharpe,
-            test: result.report.clone(),
-        });
-        results.push(result);
-        start += wf.test_bars;
-    }
-
-    let stitched = stitch(&results, cfg.initial_cash);
+    let (out_of_sample, curve, benchmark_curve) = stitch(&results, cfg.initial_cash);
     Ok(WalkForwardReport {
         windows,
-        out_of_sample: stitched.0,
-        curve: stitched.1,
+        out_of_sample,
+        curve,
+        benchmark_curve,
     })
 }
 
@@ -152,7 +156,10 @@ fn best_params<P: Clone>(
 }
 
 /// Chain test windows as if the capital rolled from one into the next.
-fn stitch(results: &[BacktestResult], initial: f64) -> (Report, Vec<EquityPoint>) {
+fn stitch(
+    results: &[BacktestResult],
+    initial: f64,
+) -> (Report, Vec<EquityPoint>, Vec<EquityPoint>) {
     let mut curve = Vec::new();
     let mut benchmark = Vec::new();
     let mut fills = Vec::new();
@@ -169,7 +176,7 @@ fn stitch(results: &[BacktestResult], initial: f64) -> (Report, Vec<EquityPoint>
     }
     let mut report = Report::compute(initial, &curve, &benchmark, &fills);
     report.funding = results.iter().map(|r| r.funding).sum();
-    (report, curve)
+    (report, curve, benchmark)
 }
 
 fn scaled(curve: &[EquityPoint], scale: f64) -> impl Iterator<Item = EquityPoint> + '_ {
