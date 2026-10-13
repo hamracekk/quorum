@@ -261,6 +261,21 @@ impl Portfolio {
     ) -> Option<(Side, f64)> {
         self.mark(instrument, price);
         let equity = self.equity();
+        self.order_for_equity(instrument, price, target, equity)
+    }
+
+    /// [`order_for`](Self::order_for) sized against a given `equity` — the engine passes the
+    /// equity at the previous timestamp's close, so every order of a timestamp is sized the
+    /// same way whatever order the instruments arrive in, and never against closes of the bar
+    /// it fills at the open of.
+    pub fn order_for_equity(
+        &mut self,
+        instrument: &InstrumentId,
+        price: f64,
+        target: f64,
+        equity: f64,
+    ) -> Option<(Side, f64)> {
+        self.mark(instrument, price);
         let target_qty = if equity > 0.0 && price > 0.0 {
             target * equity / price
         } else {

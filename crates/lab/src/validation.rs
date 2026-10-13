@@ -74,31 +74,38 @@ pub struct CpcvReport {
 pub struct ValidationReport {
     /// Parameter sets compared.
     pub configs: usize,
+    /// Each set's full-history Sharpe, in grid order with its label: how sensitive the result
+    /// is to the parameters (a lone peak among weak neighbours is a warning).
+    pub sensitivity: Vec<(String, f64)>,
     /// `None` with fewer than two sets or too little history.
     pub pbo: Option<PboReport>,
     pub cpcv: Option<CpcvReport>,
 }
 
 /// Run every parameter set over the whole history and apply both checks to their returns.
-pub fn validate<P>(
+pub fn validate<P: std::fmt::Display + Sync>(
     grid: &[P],
-    factory: &impl StrategyFactory<P>,
-    configure: impl Fn(&P, &BacktestConfig) -> BacktestConfig,
+    factory: &(impl StrategyFactory<P> + Sync),
+    configure: impl Fn(&P, &BacktestConfig) -> BacktestConfig + Sync,
     series: &[Series],
     cfg: &BacktestConfig,
     vc: ValidationConfig,
 ) -> ValidationReport {
-    let curves: Vec<Vec<EquityPoint>> = grid
-        .iter()
-        .map(|p| {
-            let mut strategy = factory.build(p);
-            run(strategy.as_mut(), series, &configure(p, cfg)).equity_curve
-        })
-        .collect();
+    let curves: Vec<Vec<EquityPoint>> = crate::par_map(grid, |p| {
+        let mut strategy = factory.build(p);
+        run(strategy.as_mut(), series, &configure(p, cfg)).equity_curve
+    });
     let (stamps, returns) = returns_matrix(&curves);
     let per_year = periods_per_year(&stamps);
+    let all: Vec<usize> = (0..stamps.len()).collect();
+    let sensitivity = grid
+        .iter()
+        .zip(&returns)
+        .map(|(p, r)| (p.to_string(), sharpe(r, &all, per_year)))
+        .collect();
     ValidationReport {
         configs: grid.len(),
+        sensitivity,
         pbo: pbo(&returns, vc.blocks, per_year),
         cpcv: cpcv(&returns, vc.groups, vc.test_groups, vc.embargo, per_year),
     }

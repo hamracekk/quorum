@@ -9,11 +9,13 @@
 //!   than the last one stored.
 
 pub mod binance;
+pub mod binance_announcements;
 pub mod binance_archive;
 pub mod binance_futures;
 pub mod binance_testnet;
 pub mod binance_ws;
 mod error;
+pub mod quality;
 mod store;
 
 pub use error::{DataError, Result};

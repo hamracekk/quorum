@@ -40,6 +40,7 @@ fn control_from(row: &SqliteRow) -> Result<PositionControl, JournalError> {
         action: match (action.as_str(), stop) {
             ("tighten_stop", Some(stop)) => ControlAction::TightenStop { stop },
             ("close", _) => ControlAction::Close,
+            ("reduce_exposure", Some(scale)) => ControlAction::ReduceExposure { scale },
             (other, _) => return Err(invalid("action", other)),
         },
         reason: row.try_get("reason")?,
@@ -64,6 +65,7 @@ impl SqliteJournal {
     ) -> Result<PositionControl, JournalError> {
         let stop = match action {
             ControlAction::TightenStop { stop } => Some(stop),
+            ControlAction::ReduceExposure { scale } => Some(scale),
             ControlAction::Close => None,
         };
         let id: i64 = sqlx::query_scalar(

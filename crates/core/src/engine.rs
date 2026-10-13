@@ -117,6 +117,9 @@ pub struct Engine<'s> {
     cfg: BacktestConfig,
     measure_from: Option<DateTime<Utc>>,
     portfolio: Portfolio,
+    /// Equity at the previous timestamp's close: what every order of the current timestamp
+    /// is sized against (feed order and same-bar closes never change a size).
+    sizing_equity: f64,
     broker: Box<dyn Broker>,
     orders: OrderBook,
     risk: RiskManager,
@@ -182,6 +185,7 @@ impl<'s> Engine<'s> {
                 // Long-only is a spot account: no buying on credit.
                 Portfolio::new(cfg.initial_cash).spot(cfg.fee_rate + cfg.slippage_bps / 10_000.0)
             },
+            sizing_equity: cfg.initial_cash,
             broker,
             orders: OrderBook::default(),
             risk: RiskManager::new(cfg.risk),
@@ -229,7 +233,9 @@ impl<'s> Engine<'s> {
             Some(latest) if bar.ts > latest => {
                 self.close_timestamp(latest, &mut out);
                 self.settle_funding(bar.ts);
+                self.sizing_equity = self.portfolio.equity();
             }
+            None => self.sizing_equity = self.portfolio.equity(),
             _ => {}
         }
         self.open_ts = Some(bar.ts);
@@ -301,6 +307,22 @@ impl<'s> Engine<'s> {
     /// goes down — for a long the new stop must be above the current one and below the latest
     /// price, for a short the reverse. A position without a stop gets one. Returns the decision
     /// event, or why the move was refused.
+    /// Cap every target at `scale` (`0..=0.95`) until `until` — a market-wide risk-reducing
+    /// control (`reduce_exposure`); takes effect at the next timestamp, like every target.
+    pub fn reduce_exposure(
+        &mut self,
+        scale: f64,
+        until: DateTime<Utc>,
+        label: &str,
+    ) -> Result<Vec<Event>, String> {
+        if !(0.0..=0.95).contains(&scale) {
+            return Err(format!("scale {scale} must be between 0 and 0.95"));
+        }
+        self.risk.cap(scale, until);
+        tracing::info!(scale, %until, label, "exposure capped");
+        Ok(Vec::new())
+    }
+
     pub fn tighten_stop(
         &mut self,
         instrument: &InstrumentId,
@@ -504,7 +526,10 @@ impl<'s> Engine<'s> {
         out: &mut Vec<Event>,
     ) -> Result<(), EngineError> {
         self.broker.quote(instrument, ts, price);
-        let Some((side, qty)) = self.portfolio.order_for(instrument, price, target) else {
+        let Some((side, qty)) =
+            self.portfolio
+                .order_for_equity(instrument, price, target, self.sizing_equity)
+        else {
             return Ok(());
         };
         let order = self.orders.create(ts, instrument, side, qty);

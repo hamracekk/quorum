@@ -1,6 +1,10 @@
 //! Golden backtest: a fixed synthetic market through a fixed strategy must produce exactly
 //! the same fills and equity, bit for bit. Refactors of execution (broker, orders, engine)
 //! must not change results; if this fails, the change altered trading behaviour.
+//!
+//! Last deliberate change (2026-10-13): orders are sized against the equity at the previous
+//! timestamp's close, not equity already marked at closes of the bar being filled (a small
+//! look-ahead that also made sizes depend on feed order).
 
 use chrono::{DateTime, Utc};
 use trader_core::risk::RiskLimits;
@@ -60,8 +64,8 @@ fn execution_is_bit_for_bit_stable() {
     assert_eq!(result.fills.len(), 278);
     assert_eq!(
         last.to_bits(),
-        4_664_902_390_175_924_346,
+        4_664_890_379_710_536_963,
         "final equity {last}"
     );
-    assert_eq!(fingerprint, 0x9a13_8e3d_ad52_99c7);
+    assert_eq!(fingerprint, 0xa5e9_2d8f_d963_dab8);
 }
