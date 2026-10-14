@@ -1,6 +1,11 @@
-use chrono::Duration;
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Duration};
 
 use super::*;
+use crate::instrument::InstrumentId;
+use crate::strategy::Strategy;
+use crate::types::Bar;
 
 fn id(symbol: &str) -> InstrumentId {
     InstrumentId::spot("test", symbol).expect("valid instrument")
@@ -59,7 +64,7 @@ fn the_model_ranks_by_the_relationship_it_learned() {
 }
 
 /// A day of bars for every coin: `UP*` rise 0.5% a day, `DN*` fall 0.5% a day.
-fn feed(s: &mut XsRidge, days: i64, mut seen: impl FnMut(&InstrumentId, Option<f64>)) {
+fn feed(s: &mut XsLearner, days: i64, mut seen: impl FnMut(&InstrumentId, Option<f64>)) {
     let coins: Vec<(InstrumentId, f64)> = ["UP1", "UP2", "UP3", "DN1", "DN2", "DN3"]
         .iter()
         .map(|c| (id(c), if c.starts_with("UP") { 1.005 } else { 0.995 }))
@@ -86,7 +91,7 @@ fn feed(s: &mut XsRidge, days: i64, mut seen: impl FnMut(&InstrumentId, Option<f
 
 #[test]
 fn it_learns_that_trends_continue_and_holds_the_risers() {
-    let mut s = XsRidge::new(2, 7, 52, PLAIN);
+    let mut s = XsRidge::strategy(2, 7, 52, PLAIN);
     let mut last: BTreeMap<InstrumentId, f64> = BTreeMap::new();
     feed(&mut s, 400, |coin, target| {
         if let Some(t) = target {
@@ -107,7 +112,7 @@ fn it_learns_that_trends_continue_and_holds_the_risers() {
 
 #[test]
 fn it_waits_for_history_and_labelled_snapshots() {
-    let mut s = XsRidge::new(2, 7, 52, PLAIN);
+    let mut s = XsRidge::strategy(2, 7, 52, PLAIN);
     let mut first_hold = None;
     let mut day = 0_usize;
     let mut count = 0_usize;
@@ -127,8 +132,8 @@ fn it_waits_for_history_and_labelled_snapshots() {
 
 #[test]
 fn later_bars_cannot_change_earlier_targets() {
-    let mut a = XsRidge::new(2, 7, 52, PLAIN);
-    let mut b = XsRidge::new(2, 7, 52, PLAIN);
+    let mut a = XsRidge::strategy(2, 7, 52, PLAIN);
+    let mut b = XsRidge::strategy(2, 7, 52, PLAIN);
     let mut ta = Vec::new();
     let mut tb = Vec::new();
     feed(&mut a, 300, |c, t| ta.push((c.clone(), t)));

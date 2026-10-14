@@ -5320,6 +5320,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "trader-ml"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "trader-core",
+]
+
+[[package]]
 name = "trader-news"
 version = "0.1.0"
 dependencies = [
@@ -5393,6 +5401,7 @@ dependencies = [
  "trader-hyperliquid",
  "trader-journal",
  "trader-lab",
+ "trader-ml",
  "trader-news",
  "trader-predictions",
  "uuid",

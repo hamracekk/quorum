@@ -27,6 +27,8 @@ depends on no internal crate.
 | `order.rs` | `Order`, `OrderId`, `OrderStatus`, `ExecutionReport`, `OrderBook`: the order state machine, rejecting illegal transitions and overfills |
 | `risk.rs` | `RiskLimits`, `RiskManager`: per-instrument and gross exposure caps, daily-loss kill switch; E-5 `PortfolioRisk` brakes (drawdown, volatility regime) scaling every target in 25% steps |
 | `strategies/follow_traders.rs` | T-4: `FollowTraders` — each instrument on the average side of the followed traders who trade it (from `follow:` position states), equal share per instrument |
+| `strategies/learner.rs` | R-5 / M9: `Learner` (fit on labelled feature rows, predict), `XsLearner` (weekly snapshots of 6 price/volume features labelled by the next rebalance's return, refit on labelled history only, hold the top predictions), `features` |
+| `strategies/ridge.rs` | R-5: `Ridge` learner (standardised ridge regression) and `XsRidge::new` — the linear benchmark every learner must beat |
 | `strategies/universe.rs` | ADR 0007 step 3: `TopVolume` — any strategy restricted to the instruments with the most trailing dollar volume at each re-ranking (point-in-time universe); members are handed to the inner strategy (`set_universe`) so rankings choose among them |
 | `strategies/exposure.rs` | R-6: `ExposureSchedule` — any strategy's targets times a scale schedule known in advance (regime filters) |
 | `strategies/portfolio_vol.rs` | RB-3: `PortfolioVolTarget` — the whole book scaled to a volatility target from the instruments' covariance |
