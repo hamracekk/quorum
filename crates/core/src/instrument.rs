@@ -89,6 +89,12 @@ impl InstrumentKind {
             Self::PredictionMarket => "prediction",
         }
     }
+
+    /// Whether the market trades on Saturdays and Sundays (UTC). Stock exchanges do not, so a
+    /// missing weekend bar there is the calendar, not a sign the instrument stopped trading.
+    pub const fn trades_weekends(self) -> bool {
+        !matches!(self, Self::Equity)
+    }
 }
 
 impl FromStr for InstrumentKind {

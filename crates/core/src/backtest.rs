@@ -455,6 +455,61 @@ mod tests {
     }
 
     #[test]
+    fn a_stock_is_not_sold_as_delisted_over_weekends() {
+        use chrono::{Datelike, Duration, TimeZone};
+        // Monday 2024-01-01; the coin trades every day, the stock on weekdays only.
+        let start = Utc
+            .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+            .single()
+            .expect("ts");
+        let day = |i: i64| Bar {
+            ts: start + Duration::days(i),
+            open: 100.0,
+            high: 100.0,
+            low: 100.0,
+            close: 100.0,
+            volume: 1.0,
+        };
+        let weekday = |i: &i64| (start + Duration::days(*i)).weekday().number_from_monday() <= 5;
+        let coin = InstrumentId::spot("test", "COIN").expect("id");
+        let stock = InstrumentId::new(
+            crate::instrument::VenueId::new("test").expect("venue"),
+            "NVDA",
+            crate::instrument::InstrumentKind::Equity,
+        )
+        .expect("id");
+        let mut cfg = BacktestConfig {
+            fee_rate: 0.0,
+            slippage_bps: 0.0,
+            ..BacktestConfig::default()
+        };
+        cfg.stops.stale_bars = 2;
+        let sold = |stock_days: Vec<i64>| {
+            let series = [
+                Series::new(coin.clone(), (0..21).map(day).collect()),
+                Series::new(stock.clone(), stock_days.into_iter().map(day).collect()),
+            ];
+            run(
+                &mut PerInstrument::new(BuyAndHold::default(), 2),
+                &series,
+                &cfg,
+            )
+            .fills
+            .iter()
+            .any(|f| f.instrument == stock && f.side == crate::types::Side::Sell)
+        };
+        assert!(
+            !sold((0..21).filter(weekday).collect()),
+            "three weeks of weekends"
+        );
+        // It stops trading after Wednesday of week two: two missed weekdays and it is sold.
+        assert!(
+            sold((0..10).filter(weekday).collect()),
+            "a real stop is still caught"
+        );
+    }
+
+    #[test]
     fn a_coin_that_stops_trading_is_sold_at_its_last_close_less_the_haircut() {
         use chrono::{Duration, TimeZone};
         let day = |i: i64, close: f64| Bar {

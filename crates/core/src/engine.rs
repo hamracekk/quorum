@@ -798,7 +798,15 @@ impl<'s> Engine<'s> {
             .filter(|(id, qty)| qty.abs() > f64::EPSILON && !seen.contains(*id))
             .map(|(id, _)| id.clone())
             .collect();
+        let weekend = matches!(
+            chrono::Datelike::weekday(&ts),
+            chrono::Weekday::Sat | chrono::Weekday::Sun
+        );
         for instrument in held {
+            // A stock has no weekend bars: those days are the calendar, not a delisting.
+            if weekend && !instrument.kind().trades_weekends() {
+                continue;
+            }
             let missed = self.missed.entry(instrument.clone()).or_default();
             *missed += 1;
             if *missed < rules.stale_bars {
