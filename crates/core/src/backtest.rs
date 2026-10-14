@@ -10,7 +10,7 @@ use crate::stops::StopRules;
 use crate::strategy::Strategy;
 use crate::types::{Bar, EquityPoint, Fill, Series};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BacktestConfig {
     pub initial_cash: f64,
     /// Commission per trade as a fraction of notional (0.001 = 0.1%).
@@ -25,6 +25,8 @@ pub struct BacktestConfig {
     /// With funding: whether longs are held as perpetuals and pay it too (`false`: longs are
     /// spot, only shorts — perpetuals — settle funding).
     pub perp_longs: bool,
+    /// How much each trade gets, how many at once, per-market budgets; off by default.
+    pub sizing: crate::sizing::SizingRules,
 }
 
 impl Default for BacktestConfig {
@@ -37,6 +39,7 @@ impl Default for BacktestConfig {
             risk: RiskLimits::default(),
             stops: StopRules::default(),
             perp_longs: true,
+            sizing: crate::sizing::SizingRules::default(),
         }
     }
 }
@@ -94,7 +97,7 @@ pub fn run_with_events(
         .filter(|s| !s.bars.is_empty())
         .map(|s| s.instrument.clone())
         .collect();
-    let mut engine = Engine::new(strategy, *cfg, &universe, measure_from);
+    let mut engine = Engine::new(strategy, cfg.clone(), &universe, measure_from);
     for s in series.iter().filter(|s| !s.funding.is_empty()) {
         engine.add_funding(&s.instrument, &s.funding);
     }
@@ -151,6 +154,7 @@ mod tests {
             },
             stops: StopRules::default(),
             perp_longs: true,
+            sizing: crate::sizing::SizingRules::default(),
         }
     }
 

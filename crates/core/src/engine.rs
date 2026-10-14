@@ -177,7 +177,6 @@ impl<'s> Engine<'s> {
     ) -> Self {
         Self {
             strategy,
-            cfg,
             measure_from,
             portfolio: if cfg.risk.allow_short {
                 Portfolio::new(cfg.initial_cash)
@@ -209,6 +208,8 @@ impl<'s> Engine<'s> {
             last_close: BTreeMap::new(),
             missed: BTreeMap::new(),
             seen: std::collections::BTreeSet::new(),
+            // Last: the fields above read it first.
+            cfg,
         }
     }
 
@@ -864,7 +865,11 @@ impl<'s> Engine<'s> {
         for instrument in done {
             self.release_manual(&instrument);
         }
-        let mut wanted = self.desired.clone();
+        let mut wanted =
+            self.cfg
+                .sizing
+                .apply(&self.desired, &self.current, self.portfolio.equity());
+        // Manual trades keep the size they were accepted at.
         for (instrument, trade) in &self.manual {
             wanted.insert(instrument.clone(), trade.target);
         }
@@ -980,6 +985,7 @@ mod tests {
             },
             stops: crate::stops::StopRules::default(),
             perp_longs: true,
+            sizing: crate::sizing::SizingRules::default(),
         }
     }
 

@@ -22,11 +22,13 @@ pub mod ports;
 pub mod predictions;
 pub mod risk;
 pub mod signals;
+pub mod sizing;
 pub mod stops;
 pub mod strategies;
 pub mod strategy;
 pub mod suggestions;
 pub mod traders;
+pub mod trades;
 pub mod types;
 
 pub use backtest::{BacktestConfig, BacktestResult, run, run_from, run_with_events};
