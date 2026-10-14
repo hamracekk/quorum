@@ -12,6 +12,7 @@ Implements the `core` ports; nothing outside this crate knows about Binance or P
 | `binance_futures.rs` | E-2: `BinanceFutures`, public keyless USDT-perpetual funding-rate history (`/fapi/v1/fundingRate`), paged |
 | `binance_announcements.rs` | RB-4: Binance's public delisting announcements (CMS catalog 161), titles parsed to tickers only |
 | `quality.rs` | RB-6: data-quality checks — missing bars, impossible candles, non-positive prices, outlier moves, dead feeds |
+| `indicators.rs` | Public, keyless market-wide series: Deribit DVOL, `DefiLlama` stablecoin supply, Coinbase daily closes (cross-check); `binance_archive.rs` also reads the futures metrics archive (open interest, long/short ratio) |
 | `binance_testnet.rs` | T-7: `BinanceTestnet`, signed (HMAC-SHA256) spot client for **testnet only** — refuses every host but `testnet.binance.vision` (and loopback mocks in tests); account (permissions, balances), `exchangeInfo` rules (step size, min notional), market orders with a client id, order lookup; redacted credentials |
 | `binance_ws.rs` | `BinanceStream`: `MarketStream` over the public websocket; closed klines only; reconnect with exponential backoff (tested against a local websocket server) |
 | `store.rs` | `ParquetStore`: `BarStore` on Parquet; `read_parquet` / `write_parquet` (atomic temp-file + rename); `migrate_flat_layout` for M1 files |
