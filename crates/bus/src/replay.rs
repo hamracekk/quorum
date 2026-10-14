@@ -41,7 +41,7 @@ pub fn replay(
         }
     }
 
-    let mut engine = Engine::new(strategy, *cfg, &universe, None);
+    let mut engine = Engine::new(strategy, cfg.clone(), &universe, None);
     let mut events = Vec::new();
     for (instrument, bar) in &bars {
         events.extend(engine.on_bar(instrument, bar)?);

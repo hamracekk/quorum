@@ -51,7 +51,7 @@ pub fn walk_forward<P: Clone + Send + Sync>(
     cfg: &BacktestConfig,
     wf: WalkForwardConfig,
 ) -> Result<WalkForwardReport<P>, LabError> {
-    walk_forward_with(grid, factory, |_, base| *base, series, cfg, wf)
+    walk_forward_with(grid, factory, |_, base| base.clone(), series, cfg, wf)
 }
 
 /// [`walk_forward`] where a parameter set can also change the backtest configuration.
