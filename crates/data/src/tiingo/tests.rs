@@ -5,6 +5,9 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
 
+/// A token-shaped dummy key.
+const TOKEN: &str = "0123456789abcdef0123456789abcdef01234567";
+
 fn nvda() -> InstrumentId {
     "tiingo:NVDA:equity".parse().expect("instrument")
 }
@@ -29,7 +32,10 @@ async fn daily_bars_are_adjusted_keyed_by_date_and_sent_with_the_key() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/tiingo/daily/NVDA/prices"))
-        .and(header("Authorization", "Token secret-key"))
+        .and(header(
+            "Authorization",
+            "Token 0123456789abcdef0123456789abcdef01234567",
+        ))
         .and(query_param("startDate", "2024-01-02"))
         .and(query_param("endDate", "2024-01-04"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
@@ -40,8 +46,7 @@ async fn daily_bars_are_adjusted_keyed_by_date_and_sent_with_the_key() {
         .expect(1)
         .mount(&server)
         .await;
-    let tiingo =
-        TiingoDaily::with_base_url(server.uri(), Some("secret-key".into())).expect("client");
+    let tiingo = TiingoDaily::with_base_url(server.uri(), Some(TOKEN.into())).expect("client");
     let bars = tiingo
         .bars(&nvda(), "1d", day(2024, 1, 2), day(2024, 1, 5))
         .await
@@ -67,7 +72,7 @@ async fn a_day_not_yet_over_is_never_returned() {
         ])))
         .mount(&server)
         .await;
-    let tiingo = TiingoDaily::with_base_url(server.uri(), Some("k".into())).expect("client");
+    let tiingo = TiingoDaily::with_base_url(server.uri(), Some(TOKEN.into())).expect("client");
     let start = yesterday.and_time(chrono::NaiveTime::MIN).and_utc();
     let bars = tiingo
         .bars(&nvda(), "1d", start, Utc::now() + TimeDelta::days(2))
@@ -80,7 +85,7 @@ async fn a_day_not_yet_over_is_never_returned() {
 #[tokio::test]
 async fn refuses_other_venues_kinds_and_intervals_without_network() {
     let tiingo =
-        TiingoDaily::with_base_url("http://127.0.0.1:9", Some("k".into())).expect("client");
+        TiingoDaily::with_base_url("http://127.0.0.1:9", Some(TOKEN.into())).expect("client");
     let (a, b) = (day(2024, 1, 1), day(2024, 2, 1));
     let coin = InstrumentId::spot("binance", "BTCUSDT").expect("instrument");
     let spot: InstrumentId = "tiingo:NVDA".parse().expect("instrument");
@@ -132,7 +137,7 @@ async fn http_errors_and_malformed_rows_are_errors() {
         )
         .mount(&server)
         .await;
-    let tiingo = TiingoDaily::with_base_url(server.uri(), Some("k".into())).expect("client");
+    let tiingo = TiingoDaily::with_base_url(server.uri(), Some(TOKEN.into())).expect("client");
     let (a, b) = (day(2024, 1, 1), day(2024, 2, 1));
     assert!(tiingo.bars(&nvda(), "1d", a, b).await.is_err(), "401");
     let amd: InstrumentId = "tiingo:AMD:equity".parse().expect("instrument");
@@ -144,22 +149,38 @@ async fn http_errors_and_malformed_rows_are_errors() {
 
 #[test]
 fn the_key_never_shows_in_debug_output() {
-    let tiingo =
-        TiingoDaily::with_base_url("http://x", Some("super-secret".into())).expect("client");
+    let tiingo = TiingoDaily::with_base_url("http://x", Some(TOKEN.into())).expect("client");
     let text = format!("{tiingo:?}");
-    assert!(
-        !text.contains("super-secret") && text.contains("<set>"),
-        "{text}"
-    );
+    assert!(!text.contains(TOKEN) && text.contains("<set>"), "{text}");
 }
 
 #[tokio::test]
 async fn an_empty_range_asks_for_nothing() {
     let tiingo =
-        TiingoDaily::with_base_url("http://127.0.0.1:9", Some("k".into())).expect("client");
+        TiingoDaily::with_base_url("http://127.0.0.1:9", Some(TOKEN.into())).expect("client");
     let bars = tiingo
         .bars(&nvda(), "1d", day(2024, 1, 2), day(2024, 1, 2))
         .await
         .expect("empty");
     assert!(bars.is_empty());
+}
+
+#[tokio::test]
+async fn another_services_key_is_never_sent_to_tiingo() {
+    // Regression (2026-10-14): `trader secrets set tiingo` asked for "the Anthropic API key",
+    // so one was stored as the Tiingo key and sent as its token.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let anthropic_like = format!("sk-ant-api03-{}", "x".repeat(90));
+    let tiingo = TiingoDaily::with_base_url(server.uri(), Some(anthropic_like)).expect("client");
+    let err = tiingo
+        .bars(&nvda(), "1d", day(2024, 1, 1), day(2024, 2, 1))
+        .await
+        .expect_err("refused");
+    assert!(format!("{err:#}").contains("nothing was sent"), "{err:#}");
+    assert!(tiingo.check().await.is_err());
 }

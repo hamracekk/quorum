@@ -75,13 +75,23 @@ impl TiingoDaily {
     }
 
     fn key(&self) -> Result<&str> {
-        self.key.as_deref().ok_or_else(|| {
+        let key = self.key.as_deref().ok_or_else(|| {
             DataError::Setup(
                 "no Tiingo API key: create a free one at tiingo.com, then run \
                  `trader secrets set tiingo`"
                     .into(),
             )
-        })
+        })?;
+        // Never send something that is not a Tiingo token (e.g. another service's key pasted
+        // by mistake) to Tiingo: tokens are short and alphanumeric.
+        if !(20..=64).contains(&key.len()) || !key.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(DataError::Setup(
+                "the stored Tiingo key is not a Tiingo token (40 characters, 0-9 and a-f): \
+                 run `trader secrets set tiingo` again; nothing was sent"
+                    .into(),
+            ));
+        }
+        Ok(key)
     }
 
     async fn prices(
