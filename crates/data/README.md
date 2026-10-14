@@ -11,6 +11,7 @@ Implements the `core` ports; nothing outside this crate knows about Binance or P
 | `binance_archive.rs` | R-1: Binance public data archive (data.binance.vision) — paged S3 listing of every spot symbol ever listed, monthly kline zips (CSV, ms or µs times) for delisted coins |
 | `binance_futures.rs` | E-2: `BinanceFutures`, public keyless USDT-perpetual funding-rate history (`/fapi/v1/fundingRate`), paged |
 | `binance_announcements.rs` | RB-4: Binance's public delisting announcements (CMS catalog 161), titles parsed to tickers only |
+| `tiingo.rs` | `TiingoDaily`: US equities end-of-day bars (TS-3, ADR 0008), `tiingo:TICKER:equity`, daily only, split/dividend-adjusted, a day returned only once it is over; key (`trader secrets set tiingo`) only in the `Authorization` header, never in `Debug` or logs |
 | `quality.rs` | RB-6: data-quality checks — missing bars, impossible candles, non-positive prices, outlier moves, dead feeds |
 | `indicators.rs` | Public, keyless market-wide series: Deribit DVOL, `DefiLlama` stablecoin supply, Coinbase daily closes (cross-check); `binance_archive.rs` also reads the futures metrics archive (open interest, long/short ratio) |
 | `binance_testnet.rs` | T-7: `BinanceTestnet`, signed (HMAC-SHA256) spot client for **testnet only** — refuses every host but `testnet.binance.vision` (and loopback mocks in tests); account (permissions, balances), `exchangeInfo` rules (step size, min notional), market orders with a client id, order lookup; redacted credentials |

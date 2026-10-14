@@ -18,6 +18,7 @@ mod error;
 pub mod indicators;
 pub mod quality;
 mod store;
+pub mod tiingo;
 
 pub use error::{DataError, Result};
 pub use store::{ParquetStore, read_parquet, write_parquet};
