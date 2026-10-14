@@ -10,6 +10,7 @@
 pub mod claude;
 pub mod extract;
 pub mod ollama;
+pub mod themes;
 
 pub use claude::ClaudeProvider;
 pub use ollama::OllamaProvider;

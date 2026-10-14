@@ -176,6 +176,84 @@ impl SqliteJournal {
         Ok(usage)
     }
 
+    async fn select_unthemed(
+        &self,
+        version: &str,
+        max: usize,
+    ) -> Result<Vec<NewsItem>, JournalError> {
+        let rows = sqlx::query(
+            "SELECT n.url, n.source, n.title, n.summary, n.published_at, n.fetched_at, \
+             n.instruments FROM news_items n \
+             WHERE NOT EXISTS (SELECT 1 FROM news_themes t WHERE t.url = n.url \
+                               AND t.prompt_version = ? AND t.status <> 'failed') \
+             ORDER BY n.published_at DESC, n.url LIMIT ?",
+        )
+        .bind(version)
+        .bind(limit(max))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(news_from).collect()
+    }
+
+    async fn upsert_themes(&self, reading: &Extraction) -> Result<(), JournalError> {
+        sqlx::query(
+            "INSERT INTO news_themes (url, prompt_version, tier, model, ts, status, \
+             relevant, events, error, input_tokens, output_tokens) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+             ON CONFLICT (url, prompt_version, tier) DO UPDATE SET model = excluded.model, \
+             ts = excluded.ts, status = excluded.status, relevant = excluded.relevant, \
+             events = excluded.events, error = excluded.error, \
+             input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens",
+        )
+        .bind(&reading.url)
+        .bind(&reading.prompt_version)
+        .bind(&reading.tier)
+        .bind(&reading.model)
+        .bind(format_ts(reading.ts))
+        .bind(status_text(reading.status))
+        .bind(reading.relevant)
+        .bind(to_json(&reading.events)?)
+        .bind(reading.error.as_deref())
+        .bind(tokens(reading.input_tokens))
+        .bind(tokens(reading.output_tokens))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn select_themes(
+        &self,
+        urls: &[String],
+        version: &str,
+    ) -> Result<Vec<Extraction>, JournalError> {
+        let rows = sqlx::query(
+            "SELECT url, prompt_version, tier, model, ts, status, relevant, events, error, \
+             input_tokens, output_tokens FROM news_themes \
+             WHERE url IN (SELECT value FROM json_each(?)) AND prompt_version = ? \
+             ORDER BY url, tier",
+        )
+        .bind(to_json(&urls)?)
+        .bind(version)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(extraction_from).collect()
+    }
+
+    async fn select_theme_readings(
+        &self,
+        since: DateTime<Utc>,
+    ) -> Result<Vec<Extraction>, JournalError> {
+        let rows = sqlx::query(
+            "SELECT url, prompt_version, tier, model, ts, status, relevant, events, error, \
+             input_tokens, output_tokens FROM news_themes \
+             WHERE status = 'ok' AND relevant = 1 AND ts >= ? ORDER BY ts, url, tier",
+        )
+        .bind(format_ts(since))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(extraction_from).collect()
+    }
+
     async fn insert_news(&self, items: &[NewsItem]) -> Result<StoredNews, JournalError> {
         let mut stored = StoredNews::default();
         let window = Duration::hours(DUPLICATE_WINDOW_HOURS);
@@ -330,6 +408,22 @@ impl NewsStore for SqliteJournal {
 
     async fn readings(&self, since: DateTime<Utc>) -> Result<Vec<Extraction>, PortError> {
         self.select_readings(since).await.map_err(port)
+    }
+
+    async fn unthemed(&self, version: &str, limit: usize) -> Result<Vec<NewsItem>, PortError> {
+        self.select_unthemed(version, limit).await.map_err(port)
+    }
+
+    async fn record_themes(&self, reading: &Extraction) -> Result<(), PortError> {
+        self.upsert_themes(reading).await.map_err(port)
+    }
+
+    async fn themes(&self, urls: &[String], version: &str) -> Result<Vec<Extraction>, PortError> {
+        self.select_themes(urls, version).await.map_err(port)
+    }
+
+    async fn theme_readings(&self, since: DateTime<Utc>) -> Result<Vec<Extraction>, PortError> {
+        self.select_theme_readings(since).await.map_err(port)
     }
 }
 

@@ -9,6 +9,7 @@ contract. Orchestration (tiers, budget, cache, storage) lives in `trader_service
 |---|---|
 | `ollama.rs` | `OllamaProvider`: local `/api/chat`, JSON-schema `format`, temperature 0 — the free first pass |
 | `claude.rs` | `ClaudeProvider`: Messages API over raw HTTP (no official Rust SDK) — structured outputs (`output_config.format`), `effort`, cache-marked frozen system prompt, optional server-side `fallbacks: "default"`, retries on 429/5xx with `retry-after`; refusal and `max_tokens` are errors; the key is redacted from `Debug` |
+| `themes.rs` | ADR 0008: `THEMES_VERSION`, theme classification against the impact map (closed list of theme ids, up/down, magnitude, confidence), `parse` expands a valid answer through the map's links into implied `NewsEvent`s (`theme` set); the model never names instruments |
 | `extract.rs` | `PROMPT_VERSION`, the frozen system prompt, the JSON schema (closed objects, enums), `request` (wraps the item as inert data), `parse` (strict validation → `Reading`) |
 
 ## Rules

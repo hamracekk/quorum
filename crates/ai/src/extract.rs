@@ -103,7 +103,7 @@ pub fn schema(assets: &[String]) -> Value {
 }
 
 /// Untrusted text made safe to embed between tags: angle brackets swapped for look-alikes.
-fn inert(text: &str) -> String {
+pub(crate) fn inert(text: &str) -> String {
     text.replace('<', "‹").replace('>', "›")
 }
 
@@ -207,6 +207,7 @@ pub fn parse(
             published_at: item.published_at,
             model: model.to_owned(),
             extracted_at: now,
+            theme: None,
         });
     }
     if answer.relevant && events.is_empty() {

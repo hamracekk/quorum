@@ -158,6 +158,7 @@ fn extraction(
                 published_at: at(0),
                 model: format!("{tier}/model"),
                 extracted_at: at(hour),
+                theme: None,
             }]
         } else {
             vec![]
@@ -288,5 +289,69 @@ async fn readings_are_the_valid_relevant_attempts_since_a_time() {
     assert_eq!(
         journal.readings(at(3)).await.expect("readings"),
         vec![remote]
+    );
+}
+
+#[tokio::test]
+async fn theme_readings_are_kept_apart_from_the_per_item_readings() {
+    let journal = SqliteJournal::in_memory().await.expect("journal");
+    journal
+        .store_news(&[
+            item("a", "coindesk", "GPU prices jump on AI demand", 0),
+            item("b", "coindesk", "Solana upgrade ships", 1),
+        ])
+        .await
+        .expect("store");
+    assert_eq!(
+        journal
+            .unthemed("themes-v1", 10)
+            .await
+            .expect("pending")
+            .len(),
+        2
+    );
+
+    let mut theme = extraction("a", "local", ExtractionStatus::Ok, 300, 2);
+    theme.prompt_version = "themes-v1".into();
+    theme.events[0].theme = Some("gpu-prices".into());
+    journal.record_themes(&theme).await.expect("record");
+    let mut failed = extraction("b", "local", ExtractionStatus::Failed, 0, 2);
+    failed.prompt_version = "themes-v1".into();
+    journal.record_themes(&failed).await.expect("record");
+
+    let pending = journal.unthemed("themes-v1", 10).await.expect("pending");
+    assert_eq!(pending.len(), 1, "a failed attempt is retried");
+    assert!(pending[0].url.ends_with("/b"));
+    // The per-item readings, their scoreboard and the ensemble see none of it.
+    assert!(
+        journal
+            .readings(at(-10))
+            .await
+            .expect("readings")
+            .is_empty()
+    );
+    assert_eq!(
+        journal
+            .unextracted("news-v1", "local", 10)
+            .await
+            .expect("unread")
+            .len(),
+        2
+    );
+    let urls = vec![theme.url.clone()];
+    let stored = journal.themes(&urls, "themes-v1").await.expect("themes");
+    assert_eq!(stored, vec![theme.clone()]);
+    let readings = journal
+        .theme_readings(at(-10))
+        .await
+        .expect("theme readings");
+    assert_eq!(readings.len(), 1, "only ok and relevant");
+    assert_eq!(readings[0].events[0].theme.as_deref(), Some("gpu-prices"));
+    assert!(
+        journal
+            .themes(&urls, "themes-v2")
+            .await
+            .expect("other version")
+            .is_empty()
     );
 }

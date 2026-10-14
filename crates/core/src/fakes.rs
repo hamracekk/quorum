@@ -276,6 +276,8 @@ pub struct MemoryLlm {
     name: String,
     model: String,
     answer: Option<String>,
+    /// `(marker, text)`: answer `text` when the system prompt contains `marker`.
+    routes: Vec<(String, String)>,
     tokens: u64,
     requests: Mutex<Vec<LlmRequest>>,
 }
@@ -290,6 +292,14 @@ impl MemoryLlm {
             tokens,
             ..Self::default()
         }
+    }
+
+    /// Also answers `text` to requests whose system prompt contains `marker` (one fake serving
+    /// two different prompts, e.g. news readings and theme readings).
+    #[must_use]
+    pub fn or_when(mut self, marker: &str, text: &str) -> Self {
+        self.routes.push((marker.to_owned(), text.to_owned()));
+        self
     }
 
     /// Every request fails, like a model server that is down.
@@ -331,7 +341,12 @@ impl LlmProvider for MemoryLlm {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(request.clone());
-        self.answer.as_ref().map_or_else(
+        let routed = self
+            .routes
+            .iter()
+            .find(|(marker, _)| request.system.contains(marker.as_str()))
+            .map(|(_, text)| text);
+        routed.or(self.answer.as_ref()).map_or_else(
             || Err(PortError::Invalid(format!("{} is down", self.name))),
             |text| {
                 Ok(LlmResponse {
