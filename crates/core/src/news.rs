@@ -117,6 +117,10 @@ pub struct NewsEvent {
     /// `provider/model` that produced it, e.g. `claude/claude-opus-5-5`.
     pub model: String,
     pub extracted_at: DateTime<Utc>,
+    /// Set on implications (ADR 0008): the impact-map theme this move was expanded from;
+    /// `None` for a direct reading of the instrument.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
 }
 
 /// How an extraction attempt ended.

@@ -61,6 +61,8 @@ pub enum SourceKind {
     Suggestion,
     /// Perpetual-futures funding extremes (E-2).
     Derivatives,
+    /// One impact-map link, theme → instrument (ADR 0008).
+    Impact,
     Technical,
     Baseline,
 }

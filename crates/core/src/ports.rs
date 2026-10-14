@@ -259,6 +259,20 @@ pub trait NewsStore: Send + Sync + fmt::Debug {
     /// Valid readings (`ok`, relevant) recorded since `since`, every prompt version and tier,
     /// oldest first: what the scoreboard scores.
     async fn readings(&self, since: DateTime<Utc>) -> Result<Vec<Extraction>, PortError>;
+
+    /// Newest items without a theme reading under `version` (ADR 0008; a failed attempt counts
+    /// as not read), newest first. Theme readings are kept apart from the readings above.
+    async fn unthemed(&self, version: &str, limit: usize) -> Result<Vec<NewsItem>, PortError>;
+
+    /// Record one theme reading (replacing an earlier one of the same item, version and tier).
+    async fn record_themes(&self, reading: &Extraction) -> Result<(), PortError>;
+
+    /// Every theme reading of these items under `version`.
+    async fn themes(&self, urls: &[String], version: &str) -> Result<Vec<Extraction>, PortError>;
+
+    /// Valid theme readings (`ok`, relevant) since `since`, oldest first: the implications the
+    /// scoreboard scores per impact link.
+    async fn theme_readings(&self, since: DateTime<Utc>) -> Result<Vec<Extraction>, PortError>;
 }
 
 /// Agents' shared knowledge and messages (ADR 0003), kept with the journal.

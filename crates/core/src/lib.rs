@@ -12,6 +12,7 @@ pub mod derivatives;
 pub mod engine;
 pub mod events;
 pub mod fakes;
+pub mod impact;
 pub mod indicators;
 pub mod instrument;
 pub mod metrics;
