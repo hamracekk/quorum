@@ -60,6 +60,7 @@ trader-agents = { path = "crates/agents" }
 trader-ai = { path = "crates/ai" }
 trader-journal = { path = "crates/journal" }
 trader-lab = { path = "crates/lab" }
+trader-ml = { path = "crates/ml" }
 trader-mcp = { path = "crates/mcp" }
 trader-server = { path = "crates/server" }
 trader-service = { path = "crates/service" }

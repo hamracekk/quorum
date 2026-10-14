@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'ml'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'trader-ml'
+  description: 'Machine-learned signal sources: gradient-boosted trees as cross-sectional learners'
+dependsOn:
+  - 'core'
