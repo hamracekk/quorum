@@ -7,6 +7,9 @@ pub enum DataError {
     Http(#[from] reqwest::Error),
     #[error("unexpected exchange response: {0}")]
     Malformed(String),
+    /// Something the operator has to set up first (e.g. an API key), with how.
+    #[error("{0}")]
+    Setup(String),
     /// The venue answered, but its answer leaves the outcome unknown (an order may or may not
     /// exist): look it up before retrying.
     #[error("outcome unknown: {0}")]
