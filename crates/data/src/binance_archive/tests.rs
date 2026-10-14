@@ -46,3 +46,16 @@ fn a_zip_holding_one_csv_is_read() {
     assert_eq!(bars.len(), 1);
     assert!((bars[0].low - 60.0).abs() < f64::EPSILON);
 }
+
+#[test]
+fn metrics_keep_the_days_last_reading() {
+    let csv = "create_time,symbol,sum_open_interest,sum_open_interest_value,count_toptrader_long_short_ratio,sum_toptrader_long_short_ratio,count_long_short_ratio,sum_taker_long_short_vol_ratio\n\
+               2024-03-01 00:00:00,BTCUSDT,71955.3,4403912741.4,1.26,1.53,1.15,0.76\n\
+               2024-03-01 23:55:00,BTCUSDT,72187.7,4500000000.0,1.26,1.53,1.30,1.13\n";
+    let day = chrono::NaiveDate::from_ymd_opt(2024, 3, 1).expect("date");
+    let m = parse_metrics(csv, day).expect("parsed");
+    assert!((m.open_interest_value - 4.5e9).abs() < 1.0);
+    assert!((m.long_short_ratio - 1.30).abs() < 1e-12);
+    assert_eq!(m.ts.date_naive(), day);
+    assert!(parse_metrics("create_time,symbol\n", day).is_none());
+}

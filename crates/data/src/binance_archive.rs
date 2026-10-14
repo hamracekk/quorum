@@ -126,6 +126,128 @@ impl BinanceArchive {
     }
 }
 
+/// One day of a USDT perpetual's positioning, from the archive's 5-minute metrics: the last
+/// reading of the day (data-sources plan; the REST endpoints keep only 30 days).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MetricsDay {
+    /// The UTC day (its open time).
+    pub ts: DateTime<chrono::Utc>,
+    /// Open interest in USD at the day's last reading.
+    pub open_interest_value: f64,
+    /// Accounts long over accounts short (all traders) at the day's last reading.
+    pub long_short_ratio: f64,
+}
+
+impl BinanceArchive {
+    /// Daily positioning of USDT perpetual `symbol` for every archived day after `after`.
+    ///
+    /// Thousands of small files: each is retried, and on a lasting failure the days read so
+    /// far come back with the error, so a caller keeps them and resumes later.
+    pub async fn futures_metrics(
+        &self,
+        symbol: &str,
+        after: Option<chrono::NaiveDate>,
+    ) -> (Vec<MetricsDay>, Option<DataError>) {
+        let mut out = Vec::new();
+        let error = self.read_metrics(symbol, after, &mut out).await.err();
+        out.sort_by_key(|m| m.ts);
+        (out, error)
+    }
+
+    /// GET `url` as bytes, up to three tries a second apart.
+    async fn bytes_with_retry(&self, url: &str) -> Result<Vec<u8>> {
+        let mut last = None;
+        for attempt in 0..3_u64 {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(attempt)).await;
+            }
+            match self
+                .client
+                .get(url)
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status)
+            {
+                Ok(response) => match response.bytes().await {
+                    Ok(bytes) => return Ok(bytes.to_vec()),
+                    Err(e) => last = Some(e),
+                },
+                Err(e) => last = Some(e),
+            }
+        }
+        Err(last.map_or_else(
+            || DataError::Malformed(format!("{url}: no answer")),
+            DataError::from,
+        ))
+    }
+
+    async fn read_metrics(
+        &self,
+        symbol: &str,
+        after: Option<chrono::NaiveDate>,
+        out: &mut Vec<MetricsDay>,
+    ) -> Result<()> {
+        let prefix = format!("data/futures/um/daily/metrics/{symbol}/");
+        let (_, keys) = self.list(&prefix).await?;
+        for key in keys.iter().filter(|k| {
+            std::path::Path::new(k)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
+        }) {
+            let Some(day) = key
+                .rsplit('-')
+                .take(3)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("-")
+                .strip_suffix(".zip")
+                .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            else {
+                continue;
+            };
+            if after.is_some_and(|a| day <= a) {
+                continue;
+            }
+            let bytes = self
+                .bytes_with_retry(&format!("{}/{key}", self.files_url))
+                .await?;
+            let mut csv = String::new();
+            zip::ZipArchive::new(Cursor::new(&bytes[..]))
+                .and_then(|mut z| {
+                    z.by_index(0)
+                        .map(|mut f| f.read_to_string(&mut csv).map(|_| ()))
+                })
+                .map_err(|e| DataError::Malformed(format!("metrics zip: {e}")))?
+                .map_err(|e| DataError::Malformed(format!("metrics csv: {e}")))?;
+            if let Some(m) = parse_metrics(&csv, day) {
+                out.push(m);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The last reading of one day's metrics CSV.
+///
+/// Columns: `create_time, symbol, sum_open_interest, sum_open_interest_value,
+/// count_toptrader_long_short_ratio, sum_toptrader_long_short_ratio, count_long_short_ratio,
+/// sum_taker_long_short_vol_ratio`.
+pub fn parse_metrics(csv: &str, day: chrono::NaiveDate) -> Option<MetricsDay> {
+    let last = csv.lines().rev().find(|l| {
+        l.split(',')
+            .nth(3)
+            .is_some_and(|v| v.trim().parse::<f64>().is_ok())
+    })?;
+    let fields: Vec<&str> = last.split(',').collect();
+    Some(MetricsDay {
+        ts: day.and_time(chrono::NaiveTime::MIN).and_utc(),
+        open_interest_value: fields.get(3)?.trim().parse().ok()?,
+        long_short_ratio: fields.get(6)?.trim().parse().ok()?,
+    })
+}
+
 /// The text of every `<tag>…</tag>` in `xml`.
 fn tags(xml: &str, tag: &str) -> Vec<String> {
     let open = format!("<{tag}>");
