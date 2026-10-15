@@ -1,0 +1,12 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'recorder'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'quorum-recorder'
+  description: 'Forward recorder: liquidations, book depth, derivatives snapshots to daily JSONL'
+dependsOn:
+  - 'core'
+  - 'slots'

@@ -28,6 +28,20 @@ tail -f ~/Library/Logs/quorum/paper-crypto-spot.log
 
 Every restart resumes the open session by replay, so nothing is lost or journaled twice.
 
+### The forward recorder
+
+`com.quorum.recorder` runs `quorum record` (`config/recorder.toml`) the same way: started at
+login, restarted after a crash, an error or an ended stream, left down after a clean stop.
+Logs: `~/Library/Logs/quorum/recorder.log`; data: `data/recorder/<feed>/<day>.jsonl`.
+
+```bash
+./deploy/launchd/install-recorder.sh
+./deploy/launchd/uninstall-recorder.sh      # recorded files stay
+```
+
+While the laptop sleeps nothing is recorded: the next `up`/`start` marker after a `down` (or
+the missing samples) shows the gap.
+
 ### Notes
 
 - The agent runs `target/release/quorum` in place: after `cargo build --release`, restart it

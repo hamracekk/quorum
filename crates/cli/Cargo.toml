@@ -20,6 +20,7 @@ quorum-bus.workspace = true
 quorum-data.workspace = true
 quorum-envelope.workspace = true
 quorum-journal.workspace = true
+quorum-recorder.workspace = true
 quorum-runner.workspace = true
 quorum-slots.workspace = true
 

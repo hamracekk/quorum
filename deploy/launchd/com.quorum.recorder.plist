@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The forward recorder under launchd (macOS): started at login, restarted after a crash, an
+     error or an ended stream (non-zero exit), left down after a clean stop (exit 0).
+     install-recorder.sh replaces __REPO__ and __LOGS__. Public data only: no orders, no keys. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.quorum.recorder</string>
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/target/release/quorum</string>
+    <string>record</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>RUST_LOG</key>
+    <string>info</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__LOGS__/recorder.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOGS__/recorder.log</string>
+</dict>
+</plist>

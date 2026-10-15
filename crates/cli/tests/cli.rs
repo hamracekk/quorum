@@ -61,3 +61,26 @@ fn an_invalid_slot_id_is_refused() {
     assert!(!out.status.success());
     assert!(text(&out.stderr).contains("slot id"));
 }
+
+#[test]
+fn the_recorder_refuses_a_config_naming_an_unknown_slot() {
+    let dir = workspace("recorder");
+    let config = dir.join("config");
+    std::fs::create_dir_all(config.join("slots")).expect("config dir");
+    std::fs::write(
+        config.join("recorder.toml"),
+        "slots = [\"equities\"]\nbook_every_secs = 300\nderivs_every_secs = 300\nliquidations = true\n",
+    )
+    .expect("recorder.toml");
+    let out = Command::new(env!("CARGO_BIN_EXE_quorum"))
+        .arg("--config")
+        .arg(&config)
+        .arg("--data")
+        .arg(dir.join("data"))
+        .arg("record")
+        .output()
+        .expect("runs");
+    assert!(!out.status.success());
+    let err = text(&out.stderr);
+    assert!(err.contains("slot `equities`"), "{err}");
+}

@@ -50,4 +50,6 @@ cargo run --release -p quorum-cli -- paper run --slot crypto-spot   # paper-trad
 cargo run --release -p quorum-cli -- paper status --slot crypto-spot
 cargo run --release -p quorum-cli -- paper stop --slot crypto-spot
 ./deploy/launchd/install.sh crypto-spot     # run it under launchd (deploy/README.md)
+cargo run --release -p quorum-cli -- record   # forward recorder (config/recorder.toml)
+./deploy/launchd/install-recorder.sh        # the recorder under launchd
 ```

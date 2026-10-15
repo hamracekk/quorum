@@ -11,9 +11,12 @@ use clap::{Parser, Subcommand};
 use quorum_bus::JsonlEventLog;
 use quorum_data::ParquetStore;
 use quorum_data::binance::BinanceSpot;
+use quorum_data::binance_futures::BinanceFutures;
+use quorum_data::binance_liquidations::BinanceLiquidations;
 use quorum_data::binance_ws::BinanceStream;
 use quorum_envelope::Envelope;
 use quorum_journal::SqliteJournal;
+use quorum_recorder::{Feeds, RecordStore, RecorderConfig, record};
 use quorum_runner::{Ports, RunOptions, SlotFiles, request_stop, run};
 use quorum_slots::{SlotConfig, SlotId};
 
@@ -41,6 +44,9 @@ enum Command {
         #[command(subcommand)]
         command: Paper,
     },
+    /// Forward-record liquidations, book depth and derivatives (`config/recorder.toml`) until
+    /// Ctrl+C or SIGTERM.
+    Record,
 }
 
 #[derive(Debug, Subcommand)]
@@ -91,6 +97,7 @@ async fn main() -> Result<ExitCode> {
                 Ok(ExitCode::SUCCESS)
             }
         },
+        Command::Record => record_run(&cli.config, &cli.data).await,
     }
 }
 
@@ -174,6 +181,51 @@ async fn paper_run(config: &Path, data: &Path, slot: &str, fresh: bool) -> Resul
         slot.id
     );
     Ok(if outcome.status.restart() {
+        ExitCode::from(RESTART)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+async fn record_run(config: &Path, data: &Path) -> Result<ExitCode> {
+    let recorder = RecorderConfig::load(&config.join("recorder.toml")).context("recorder")?;
+    let slots = recorder
+        .slots
+        .iter()
+        .map(|id| {
+            let path = config.join("slots").join(format!("{}.toml", id.as_str()));
+            SlotConfig::load(&path).with_context(|| format!("slot `{id}`"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let symbols = recorder.resolve(&slots)?;
+    let feeds = Feeds {
+        book: Arc::new(BinanceSpot::new().context("binance spot")?),
+        derivs: Arc::new(BinanceFutures::new().context("binance futures")?),
+        liquidations: Arc::new(BinanceLiquidations::new().context("binance liquidations")?),
+    };
+    let store = RecordStore::new(data.join("recorder"));
+    tracing::info!(symbols = symbols.len(), dir = %store.root().display(), "recording");
+    let (status, outcome) = record(
+        &feeds,
+        &symbols,
+        &recorder,
+        &store,
+        &chrono::Utc::now,
+        shutdown_signal(),
+    )
+    .await?;
+    println!(
+        "recorder {}: {} liquidations, {} books, {} derivs snapshots, {} failed polls",
+        match status {
+            quorum_recorder::Status::Stopped => "stopped",
+            quorum_recorder::Status::StreamEnded => "stream ended",
+        },
+        outcome.liquidations,
+        outcome.books,
+        outcome.derivs,
+        outcome.errors
+    );
+    Ok(if status.restart() {
         ExitCode::from(RESTART)
     } else {
         ExitCode::SUCCESS
