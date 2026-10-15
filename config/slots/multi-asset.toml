@@ -1,0 +1,40 @@
+# Multi-asset research slot: 25 liquid US-listed ETFs across asset classes, so factor studies
+# test across markets, not only within crypto. Research only: Tiingo (end-of-day, adjusted
+# prices) is a data source, not a venue; the envelope does not allow it, so this slot cannot
+# paper-trade. EU retail cannot buy these US ETFs (PRIIPs, DESIGN §19.1): trading the results
+# means UCITS equivalents or futures through IBKR.
+
+id = "multi-asset"
+venue = "tiingo"
+interval = "1d"
+calendar = "weekdays"
+start_mode = "research"
+paper_capital = 10000
+history_days = 730
+
+[universe]
+kind = "fixed"
+instruments = [
+  # Equity indices: US large, tech, small; developed, emerging; Japan, Germany, China; energy.
+  "tiingo:SPY:equity", "tiingo:QQQ:equity", "tiingo:IWM:equity", "tiingo:EFA:equity",
+  "tiingo:EEM:equity", "tiingo:EWJ:equity", "tiingo:EWG:equity", "tiingo:FXI:equity",
+  "tiingo:XLE:equity",
+  # Bonds: long, mid, short Treasuries; investment grade, high yield; inflation-linked; EM debt.
+  "tiingo:TLT:equity", "tiingo:IEF:equity", "tiingo:SHY:equity", "tiingo:LQD:equity",
+  "tiingo:HYG:equity", "tiingo:TIP:equity", "tiingo:EMB:equity",
+  # Commodities: gold, silver, oil, broad, agriculture.
+  "tiingo:GLD:equity", "tiingo:SLV:equity", "tiingo:USO:equity", "tiingo:DBC:equity",
+  "tiingo:DBA:equity",
+  # Real estate.
+  "tiingo:VNQ:equity",
+  # Currencies: US dollar, euro, yen.
+  "tiingo:UUP:equity", "tiingo:FXE:equity", "tiingo:FXY:equity",
+]
+
+[strategy]
+kind = "trend-momentum"
+lookback = 120
+
+[costs]
+fee_rate = 0.0005       # IBKR-like commission on small tickets, conservative
+slippage_bps = 2.0      # liquid ETFs: about a tick

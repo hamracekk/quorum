@@ -113,6 +113,27 @@ pub enum TradingCalendar {
     /// 24/7 (crypto).
     #[default]
     AlwaysOpen,
+    /// Exchange sessions on weekdays (stocks, ETFs, futures): about 252 trading days a year,
+    /// sessions of about 6.5 hours. Holidays are simply days without a bar.
+    Weekdays,
+}
+
+/// Trading days a year on an exchange calendar.
+const EXCHANGE_DAYS: f64 = 252.0;
+/// Hours in a regular exchange session (US cash equities), for intraday bars.
+const SESSION_HOURS: f64 = 6.5;
+
+impl TradingCalendar {
+    /// Bars of `interval_secs` seconds in a year: what annualises volatility and returns.
+    #[must_use]
+    pub fn bars_per_year(self, interval_secs: i64) -> f64 {
+        let secs = interval_secs.max(1) as f64;
+        match self {
+            Self::AlwaysOpen => 365.0 * 86_400.0 / secs,
+            Self::Weekdays if secs >= 86_400.0 => EXCHANGE_DAYS * 86_400.0 / secs,
+            Self::Weekdays => EXCHANGE_DAYS * (SESSION_HOURS * 3_600.0 / secs).max(1.0),
+        }
+    }
 }
 
 /// Trading costs the slot is judged with — in backtests, paper fills and the ladder's slippage

@@ -18,7 +18,7 @@ Implements the `core` ports; nothing outside this crate knows about Binance or P
 | `binance_testnet.rs` | T-7: `BinanceTestnet`, signed (HMAC-SHA256) spot client for **testnet only** — refuses every host but `testnet.binance.vision` (and loopback mocks in tests); account (permissions, balances), `exchangeInfo` rules (step size, min notional), market orders with a client id, order lookup; redacted credentials |
 | `binance_ws.rs` | `BinanceStream`: `MarketStream` over the public websocket; closed klines only; reconnect with exponential backoff (tested against a local websocket server) |
 | `store.rs` | `ParquetStore`: `BarStore` on Parquet; `read_parquet` / `write_parquet` (atomic temp-file + rename); `migrate_flat_layout` for M1 files |
-| `lib.rs` | `sync(source, store, instrument, interval, since_if_empty, until)`: fetches only bars newer than the last stored one |
+| `lib.rs` | `sync(source, store, instrument, interval, since_if_empty, until)`: fetches only bars newer than the last stored one; `backfill(source, store, instrument, interval, since)`: prepends only bars older than the first stored one, never changing stored bars |
 | `error.rs` | `DataError` (detailed); wrapped into `PortError` at the port boundary |
 
 ## Storage format

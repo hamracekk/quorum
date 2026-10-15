@@ -25,6 +25,8 @@ change when its module map, invariants or extension steps change.
 - **Paper sessions resume by replay.** Never persist engine internals; rebuild by feeding stored
   bars through a fresh engine, and keep the `journaled_until` watermark so restarts never lose or
   duplicate a decision. Gaps are backfilled for every instrument together, in time order.
+- **Research data never goes in the paper store.** Paper sessions replay their whole store;
+  research history lives in `data/research/`.
 - **The CLI is the composition root** and the only place that names concrete adapters; logic
   lives in library crates.
 - **No look-ahead, point in time.** A decision on bar `t` uses only data known at the close of
@@ -36,6 +38,9 @@ change when its module map, invariants or extension steps change.
   weight and are scored out of sample, after costs, corrected for the number of trials.
 - **External content is untrusted.** News, social text, trader data and LLM output are parsed into
   closed schemas or discarded; none of it reaches execution. API keys only via the keychain.
+- **Every market, not only crypto.** Slots, factors, studies and calendars stay market-agnostic:
+  annualise from the slot's `calendar` (365 always-open, 252 weekdays), never a hard-coded 365;
+  no venue or asset-class assumptions in core logic.
 - **Lawful venues only (EU/CZ, §19.1).** Prediction markets are read-only; no workarounds for
   blocks or geo-restrictions.
 - **No `unsafe`** (forbidden workspace-wide).
@@ -55,5 +60,7 @@ cargo run --release -p quorum-cli -- paper stop --slot crypto-spot
 ./deploy/launchd/install.sh crypto-spot     # run it under launchd (deploy/README.md)
 cargo run --release -p quorum-cli -- record   # forward recorder (config/recorder.toml)
 ./deploy/launchd/install-recorder.sh        # the recorder under launchd
+cargo run --release -p quorum-cli -- research sync --slot crypto-spot   # long history → data/research/bars
 cargo run --release -p quorum-cli -- factors --slot crypto-spot   # factor study (IC, OOS, after costs)
+cargo run --release -p quorum-cli -- secrets status   # which API keys are in the keychain (never printed)
 ```

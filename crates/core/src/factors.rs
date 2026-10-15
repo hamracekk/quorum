@@ -226,7 +226,8 @@ impl PriceFactor for VolumeSurprise {
     }
 }
 
-/// The price & trend family, for bars of `periods_per_year` per year (365 for daily crypto).
+/// The price & trend family, for `periods_per_year` bars a year (from the slot's calendar: 365
+/// daily bars for crypto, about 252 for exchange-traded markets).
 #[must_use]
 pub fn price_family(periods_per_year: f64) -> Vec<Box<dyn PriceFactor>> {
     vec![

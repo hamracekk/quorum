@@ -62,6 +62,21 @@ fn the_shipped_slot_is_valid_inside_the_shipped_envelope() {
 }
 
 #[test]
+fn calendars_annualise_by_their_trading_days() {
+    let day = 86_400;
+    assert!((TradingCalendar::AlwaysOpen.bars_per_year(day) - 365.0).abs() < 1e-9);
+    assert!((TradingCalendar::Weekdays.bars_per_year(day) - 252.0).abs() < 1e-9);
+    assert!((TradingCalendar::AlwaysOpen.bars_per_year(3_600) - 8_760.0).abs() < 1e-9);
+    // A 6.5-hour session holds 6.5 hourly bars.
+    assert!((TradingCalendar::Weekdays.bars_per_year(3_600) - 1_638.0).abs() < 1e-9);
+    let weekdays = SLOT.replace("[universe]", "calendar = \"weekdays\"\n\n[universe]");
+    assert_eq!(
+        SlotConfig::parse(&weekdays).expect("valid").calendar,
+        TradingCalendar::Weekdays
+    );
+}
+
+#[test]
 fn costs_apply_to_a_backtest_config() {
     let slot =
         SlotConfig::parse(&SLOT.replace("slippage_bps = 2.0", "slippage_bps = 5.0\nimpact = 0.05"))
@@ -137,4 +152,21 @@ fn venues_outside_the_envelope_are_rejected() {
         .expect_err("ibkr not allowed")
         .to_string();
     assert!(message.contains("venues_allowed"), "{message}");
+}
+
+#[test]
+fn every_shipped_slot_is_valid() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/slots");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).expect("config/slots") {
+        let path = entry.expect("entry").path();
+        if path.extension().is_some_and(|e| e == "toml") {
+            let slot =
+                SlotConfig::load(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let stem = path.file_stem().and_then(|s| s.to_str()).expect("name");
+            assert_eq!(slot.id.as_str(), stem, "file name matches the slot id");
+            checked += 1;
+        }
+    }
+    assert!(checked >= 2, "crypto-spot and multi-asset at least");
 }

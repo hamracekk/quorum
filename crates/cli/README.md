@@ -10,6 +10,10 @@ prints output; logic lives in the library crates.
 quorum paper run --slot crypto-spot [--fresh]   # paper-trade until Ctrl+C or `paper stop`
 quorum paper status --slot crypto-spot          # session, watermark, equity, positions
 quorum paper stop --slot crypto-spot            # stop at the next heartbeat (resumable)
+quorum record                                   # forward recorder (config/recorder.toml)
+quorum research sync --slot multi-asset --days 7500   # research history → data/research/bars
+quorum factors --slot multi-asset --horizon 5   # factor study → data/factors/
+quorum secrets set tiingo | status              # API keys in the macOS keychain (service quorum)
 ```
 
 Exit codes of `paper run`: `0` after a requested stop (Ctrl+C, SIGTERM, `paper stop`), `75`
