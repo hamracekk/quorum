@@ -47,6 +47,15 @@ enum Command {
     /// Forward-record liquidations, book depth and derivatives (`config/recorder.toml`) until
     /// Ctrl+C or SIGTERM.
     Record,
+    /// Study the price & trend factors across a slot's instruments (stored bars), in-sample
+    /// vs out-of-sample, after costs. Writes the report to `<data>/factors/`.
+    Factors {
+        #[arg(long)]
+        slot: String,
+        /// Bars between rebalance dates and the forward window.
+        #[arg(long, default_value_t = 7)]
+        horizon: usize,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -98,6 +107,9 @@ async fn main() -> Result<ExitCode> {
             }
         },
         Command::Record => record_run(&cli.config, &cli.data).await,
+        Command::Factors { slot, horizon } => {
+            factors(&cli.config, &cli.data, &slot, horizon).map(|()| ExitCode::SUCCESS)
+        }
     }
 }
 
@@ -230,6 +242,89 @@ async fn record_run(config: &Path, data: &Path) -> Result<ExitCode> {
     } else {
         ExitCode::SUCCESS
     })
+}
+
+fn factors(config: &Path, data: &Path, slot: &str, horizon: usize) -> Result<()> {
+    use quorum_core::BarStore as _;
+    use quorum_lab::factors::{FactorStudyConfig, study};
+
+    let (slot, _) = load(config, slot)?;
+    let quorum_slots::Universe::Fixed { instruments } = &slot.universe else {
+        bail!("{}: factor studies need a fixed universe for now", slot.id);
+    };
+    let store = ParquetStore::new(data.join("bars"));
+    let mut series = Vec::new();
+    for instrument in instruments {
+        match store.load(instrument, &slot.interval)? {
+            Some(s) if !s.bars.is_empty() => series.push(s),
+            _ => tracing::warn!(%instrument, "no stored bars; run the paper session once to sync"),
+        }
+    }
+    if series.is_empty() {
+        bail!(
+            "no stored bars for {}: run `quorum paper run --slot {}` once",
+            slot.id,
+            slot.id
+        );
+    }
+    let step = quorum_runner::interval_duration(&slot.interval)?;
+    let cfg = FactorStudyConfig {
+        horizon,
+        cost: 2.0 * (slot.costs.fee_rate + slot.costs.slippage_bps / 10_000.0),
+        periods_per_year: 365.0 * 86_400.0 / step.num_seconds().max(1) as f64,
+        ..FactorStudyConfig::default()
+    };
+    let family = quorum_core::factors::price_family(cfg.periods_per_year);
+    let report = study(&family, &series, &cfg);
+
+    println!(
+        "{} factors · {} instruments · {} → {} · horizon {} bars · round-trip cost {:.2}% · in-sample |t| ≥ {}",
+        report.factors_tested,
+        report.instruments,
+        report
+            .first_date
+            .map_or_else(String::new, |d| d.date_naive().to_string()),
+        report
+            .last_date
+            .map_or_else(String::new, |d| d.date_naive().to_string()),
+        report.horizon,
+        report.cost * 100.0,
+        report.t_threshold,
+    );
+    println!(
+        "{:<22} {:>4} {:>7} {:>7} {:>7} {:>7} {:>10} {:>9}  verdict",
+        "factor", "dir", "IC in", "t in", "IC out", "t out", "excess/yr", "turnover"
+    );
+    for row in &report.rows {
+        println!(
+            "{:<22} {:>4} {:>7.3} {:>7.2} {:>7.3} {:>7.2} {:>9.1}% {:>8.0}%  {:?}",
+            row.factor,
+            if row.direction > 0 { "+" } else { "−" },
+            row.in_sample.ic,
+            row.in_sample.ic_t,
+            row.out_of_sample.ic,
+            row.out_of_sample.ic_t,
+            row.out_of_sample.long_excess_net_annual * 100.0,
+            row.out_of_sample.turnover * 100.0,
+            row.verdict,
+        );
+    }
+    println!(
+        "IC and t are signed by the in-sample direction; excess/yr: the top quintile over the \
+         universe out-of-sample, net of turnover costs. Today's survivors: results are flattered."
+    );
+    let dir = data.join("factors");
+    std::fs::create_dir_all(&dir).with_context(|| format!("{}", dir.display()))?;
+    let path = dir.join(format!(
+        "{}-{}-h{}.json",
+        slot.id,
+        chrono::Utc::now().date_naive(),
+        horizon
+    ));
+    std::fs::write(&path, serde_json::to_string_pretty(&report)?)
+        .with_context(|| format!("{}", path.display()))?;
+    println!("report: {}", path.display());
+    Ok(())
 }
 
 /// A running session writes `state.json` at least every heartbeat (10 s); older than this means

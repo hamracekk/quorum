@@ -43,6 +43,12 @@ allocator (DESIGN §16).
 | `config/slots/crypto-spot.toml` | Crypto spot slot: daily trend-momentum, 25 coins, Binance |
 | `config/recorder.toml` | What the forward recorder records and how often |
 
+## Research
+
+```bash
+cargo run --release -p quorum-cli -- factors --slot crypto-spot --horizon 7   # factor study → data/factors/
+```
+
 ## Paper trading
 
 ```bash

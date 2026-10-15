@@ -12,6 +12,8 @@ dependsOn:
   - 'data'
   - 'envelope'
   - 'journal'
+  - 'lab'
+  - 'core'
   - 'recorder'
   - 'runner'
   - 'slots'

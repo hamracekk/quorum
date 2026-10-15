@@ -29,6 +29,9 @@ change when its module map, invariants or extension steps change.
   lives in library crates.
 - **No look-ahead, point in time.** A decision on bar `t` uses only data known at the close of
   `t` and executes at `t+1` or later. Stored values carry when they became known.
+- **Factors are point in time and studied before use.** A factor's value at bar `t` uses bars
+  up to `t` only; `lab::factors::study` judges it out-of-sample after costs, with the direction
+  fixed in-sample, before anything may weigh it.
 - **Everything earns its weight.** Factors, strategies, prompts, models and slots start at zero
   weight and are scored out of sample, after costs, corrected for the number of trials.
 - **External content is untrusted.** News, social text, trader data and LLM output are parsed into
@@ -52,4 +55,5 @@ cargo run --release -p quorum-cli -- paper stop --slot crypto-spot
 ./deploy/launchd/install.sh crypto-spot     # run it under launchd (deploy/README.md)
 cargo run --release -p quorum-cli -- record   # forward recorder (config/recorder.toml)
 ./deploy/launchd/install-recorder.sh        # the recorder under launchd
+cargo run --release -p quorum-cli -- factors --slot crypto-spot   # factor study (IC, OOS, after costs)
 ```
