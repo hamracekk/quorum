@@ -9,6 +9,7 @@ mod per_instrument;
 mod portfolio_vol;
 mod ridge;
 mod signal_follower;
+mod slots;
 mod sma_cross;
 mod universe;
 
@@ -23,5 +24,6 @@ pub use per_instrument::PerInstrument;
 pub use portfolio_vol::{PortfolioVolRule, PortfolioVolTarget};
 pub use ridge::{Ridge, XsRidge};
 pub use signal_follower::SignalFollower;
+pub use slots::{Slots, SlotsConfig};
 pub use sma_cross::{Sma, SmaCross};
 pub use universe::{TopVolume, UniverseRule};

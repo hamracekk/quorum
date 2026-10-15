@@ -354,7 +354,11 @@ impl Ensemble {
     }
 
     /// Weighted agreement of the active calls on `instrument`, and who contributed.
-    fn conviction(&self, instrument: &InstrumentId, now: DateTime<Utc>) -> (f64, Vec<Value>) {
+    pub(super) fn conviction(
+        &self,
+        instrument: &InstrumentId,
+        now: DateTime<Utc>,
+    ) -> (f64, Vec<Value>) {
         let total: f64 = self.weights.values().map(|w| w.weight).sum();
         if total <= 0.0 {
             return (0.0, Vec::new());

@@ -77,7 +77,7 @@ impl VolTarget {
 }
 
 /// Recent closes, newest last, at most `cap` of them.
-fn push_close(closes: &mut VecDeque<f64>, close: f64, cap: usize) {
+pub(super) fn push_close(closes: &mut VecDeque<f64>, close: f64, cap: usize) {
     closes.push_back(close);
     while closes.len() > cap {
         closes.pop_front();
@@ -85,7 +85,7 @@ fn push_close(closes: &mut VecDeque<f64>, close: f64, cap: usize) {
 }
 
 /// Return over `lookback` bars, once known.
-fn momentum(closes: &VecDeque<f64>, lookback: usize) -> Option<f64> {
+pub(super) fn momentum(closes: &VecDeque<f64>, lookback: usize) -> Option<f64> {
     if closes.len() <= lookback {
         return None;
     }
