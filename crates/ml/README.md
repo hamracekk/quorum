@@ -31,6 +31,9 @@ anything else.
 
 ## Testing
 
+Walk-forward on 25 coins (2026-10-14): Sharpe 0.40, PBO 93% — rejected against ridge (0.77)
+and trend-momentum (1.18); see PLAN M9.
+
 `cargo test -p trader-ml`: trees learn a U-shape a line cannot, the same data gives bit-identical
 trees, too few samples fit nothing, one extreme label does not move predictions, and as a
 strategy it holds the rising coins without look-ahead.
