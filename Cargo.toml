@@ -28,6 +28,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
 thiserror = "2"
+# Operator config files (envelope, slots).
+toml = "0.9"
 # News feeds: RSS 0.x/1.0/2.0, Atom and JSON Feed.
 feed-rs = "3"
 tokio-stream = "0.1"
@@ -46,6 +48,8 @@ quorum-ai = { path = "crates/ai" }
 quorum-journal = { path = "crates/journal" }
 quorum-lab = { path = "crates/lab" }
 quorum-ml = { path = "crates/ml" }
+quorum-envelope = { path = "crates/envelope" }
+quorum-slots = { path = "crates/slots" }
 
 # Centralized lint policy — every crate opts in with `[lints] workspace = true`.
 # Levels are `warn` locally (so dev builds stay usable); `cargo lint` and CI pass

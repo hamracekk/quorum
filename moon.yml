@@ -38,6 +38,12 @@ tasks:
       - 'journal:fmt'
       - 'journal:lint'
       - 'journal:test'
+      - 'envelope:fmt'
+      - 'envelope:lint'
+      - 'envelope:test'
+      - 'slots:fmt'
+      - 'slots:lint'
+      - 'slots:test'
     options:
       cache: false
       runInCI: false

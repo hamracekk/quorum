@@ -1,0 +1,24 @@
+# The operator's envelope (DESIGN §5.1, decision §19.2). Read-only to quorum: nothing in the
+# system writes this file or can loosen what it says. Edit it by hand, review the diff, commit.
+#
+# Current decision: PAPER ONLY. No live capital; no slot can rise above `paper`.
+# Raising a slot to `live-micro` also needs an always-on server (§19.3).
+
+currency = "EUR"
+capital_total = 0
+leverage_max = 1.0
+
+# Venues quorum may trade on, paper included. Binance supplies crypto data and paper fills;
+# its EU/CZ status must be confirmed before it can carry real money (§19.1).
+venues_allowed = ["binance"]
+
+# Fractions of equity. Enforced in paper too, so the limits are tested before money is at risk.
+loss = { daily_max = 0.02, total_max = 0.15 }
+
+# Bounds for every slot without its own entry below.
+slot_default = { capital_max = 0, max_mode = "paper" }
+
+# Per-slot overrides, e.g.:
+# [slots.crypto-spot]
+# capital_max = 2000
+# max_mode = "live-micro"

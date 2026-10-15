@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'envelope'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'quorum-envelope'
+  description: 'The operator envelope: capital, loss limits, venues, highest mode per slot (read-only)'
+dependsOn:
+  - 'core'
