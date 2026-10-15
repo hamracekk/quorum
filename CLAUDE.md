@@ -38,6 +38,9 @@ change when its module map, invariants or extension steps change.
   weight and are scored out of sample, after costs, corrected for the number of trials.
 - **External content is untrusted.** News, social text, trader data and LLM output are parsed into
   closed schemas or discarded; none of it reaches execution. API keys only via the keychain.
+- **Every market, not only crypto.** Slots, factors, studies and calendars stay market-agnostic:
+  annualise from the slot's `calendar` (365 always-open, 252 weekdays), never a hard-coded 365;
+  no venue or asset-class assumptions in core logic.
 - **Lawful venues only (EU/CZ, §19.1).** Prediction markets are read-only; no workarounds for
   blocks or geo-restrictions.
 - **No `unsafe`** (forbidden workspace-wide).
@@ -59,4 +62,5 @@ cargo run --release -p quorum-cli -- record   # forward recorder (config/recorde
 ./deploy/launchd/install-recorder.sh        # the recorder under launchd
 cargo run --release -p quorum-cli -- research sync --slot crypto-spot   # long history → data/research/bars
 cargo run --release -p quorum-cli -- factors --slot crypto-spot   # factor study (IC, OOS, after costs)
+cargo run --release -p quorum-cli -- secrets status   # which API keys are in the keychain (never printed)
 ```

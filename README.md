@@ -41,6 +41,7 @@ allocator (DESIGN §16).
 |---|---|
 | `config/envelope.toml` | The operator envelope. Paper only today |
 | `config/slots/crypto-spot.toml` | Crypto spot slot: daily trend-momentum, 25 coins, Binance |
+| `config/slots/multi-asset.toml` | Research slot: 25 US ETFs across asset classes (Tiingo; cannot paper-trade) |
 | `config/recorder.toml` | What the forward recorder records and how often |
 
 ## Research
@@ -48,7 +49,13 @@ allocator (DESIGN §16).
 ```bash
 cargo run --release -p quorum-cli -- research sync --slot crypto-spot --days 3000   # → data/research/bars
 cargo run --release -p quorum-cli -- factors --slot crypto-spot --horizon 7        # → data/factors/
+cargo run --release -p quorum-cli -- secrets set tiingo                            # once: Tiingo key → keychain
+cargo run --release -p quorum-cli -- research sync --slot multi-asset --days 7500  # 25 cross-asset ETFs
+cargo run --release -p quorum-cli -- factors --slot multi-asset --horizon 5
 ```
+
+Research slots span markets: `crypto-spot` (25 coins, Binance) and `multi-asset` (25 US ETFs
+across equity indices, bonds, commodities, real estate and currencies, Tiingo end-of-day).
 
 Research history lives apart from the paper store: a paper session replays everything in its
 store, so a longer history there would change how it warms up.

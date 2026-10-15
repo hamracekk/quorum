@@ -21,6 +21,8 @@ use quorum_recorder::{Feeds, RecordStore, RecorderConfig, record};
 use quorum_runner::{Ports, RunOptions, SlotFiles, request_stop, run};
 use quorum_slots::{SlotConfig, SlotId};
 
+mod secrets;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "quorum",
@@ -62,6 +64,19 @@ enum Command {
         #[command(subcommand)]
         command: Research,
     },
+    /// API keys in the macOS keychain (never printed).
+    Secrets {
+        #[command(subcommand)]
+        command: Secrets,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum Secrets {
+    /// Store a key; `security` prompts for it, so it never appears on a command line.
+    Set { account: String },
+    /// Whether each known key is stored (never the key itself).
+    Status,
 }
 
 #[derive(Debug, Subcommand)]
@@ -130,6 +145,25 @@ async fn main() -> Result<ExitCode> {
         } => research_sync(&cli.config, &cli.data, &slot, days)
             .await
             .map(|()| ExitCode::SUCCESS),
+        Command::Secrets { command } => {
+            match command {
+                Secrets::Set { account } => {
+                    secrets::store_interactive(&account)?;
+                    println!("stored `{account}` in the keychain (service quorum)");
+                }
+                Secrets::Status => {
+                    for account in secrets::KNOWN {
+                        let state = if secrets::get(account).is_some() {
+                            "set"
+                        } else {
+                            "missing"
+                        };
+                        println!("{account:<10} {state}");
+                    }
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Factors { slot, horizon } => {
             factors(&cli.config, &cli.data, &slot, horizon).map(|()| ExitCode::SUCCESS)
         }
@@ -277,26 +311,38 @@ fn research_store(data: &Path) -> ParquetStore {
     ParquetStore::new(research_dir(data))
 }
 
+/// Market data for a research slot's venue.
+fn research_market(slot: &SlotConfig) -> Result<Box<dyn quorum_core::MarketData>> {
+    match slot.venue.as_str() {
+        "binance" => Ok(Box::new(BinanceSpot::new().context("binance market data")?)),
+        "tiingo" => {
+            let key = secrets::get(secrets::TIINGO);
+            if key.is_none() {
+                bail!("no Tiingo key: `quorum secrets set tiingo` (free key at tiingo.com)");
+            }
+            Ok(Box::new(
+                quorum_data::tiingo::TiingoDaily::new(key).context("tiingo market data")?,
+            ))
+        }
+        other => bail!("no research data adapter for venue `{other}` yet (binance, tiingo)"),
+    }
+}
+
 async fn research_sync(config: &Path, data: &Path, slot: &str, days: u32) -> Result<()> {
     let (slot, _) = load(config, slot)?;
     let quorum_slots::Universe::Fixed { instruments } = &slot.universe else {
         bail!("{}: research sync needs a fixed universe for now", slot.id);
     };
-    if slot.venue.as_str() != "binance" {
-        bail!(
-            "no adapters for venue `{}` yet (binance only)",
-            slot.venue.as_str()
-        );
-    }
-    let market = BinanceSpot::new().context("binance market data")?;
+    let market = research_market(&slot)?;
+    let market = market.as_ref();
     let store = research_store(data);
     let now = chrono::Utc::now();
     let since = now - chrono::Duration::days(i64::from(days));
     for instrument in instruments {
-        quorum_data::sync(&market, &store, instrument, &slot.interval, since, now)
+        quorum_data::sync(market, &store, instrument, &slot.interval, since, now)
             .await
             .with_context(|| format!("sync {instrument}"))?;
-        quorum_data::backfill(&market, &store, instrument, &slot.interval, since)
+        quorum_data::backfill(market, &store, instrument, &slot.interval, since)
             .await
             .with_context(|| format!("backfill {instrument}"))?;
     }
@@ -361,7 +407,7 @@ fn factors(config: &Path, data: &Path, slot: &str, horizon: usize) -> Result<()>
     let cfg = FactorStudyConfig {
         horizon,
         cost: 2.0 * (slot.costs.fee_rate + slot.costs.slippage_bps / 10_000.0),
-        periods_per_year: 365.0 * 86_400.0 / step.num_seconds().max(1) as f64,
+        periods_per_year: slot.calendar.bars_per_year(step.num_seconds()),
         ..FactorStudyConfig::default()
     };
     let family = quorum_core::factors::price_family(cfg.periods_per_year);
