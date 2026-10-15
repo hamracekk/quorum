@@ -9,6 +9,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use quorum_bus::JsonlEventLog;
+use quorum_core::BarStore as _;
 use quorum_data::ParquetStore;
 use quorum_data::binance::BinanceSpot;
 use quorum_data::binance_futures::BinanceFutures;
@@ -55,6 +56,23 @@ enum Command {
         /// Bars between rebalance dates and the forward window.
         #[arg(long, default_value_t = 7)]
         horizon: usize,
+    },
+    /// Research data, kept apart from what paper sessions replay.
+    Research {
+        #[command(subcommand)]
+        command: Research,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum Research {
+    /// Download a slot's instruments' bars back `days` days into `<data>/research/bars`
+    /// (extends older history and brings it up to date; the paper store is never touched).
+    Sync {
+        #[arg(long)]
+        slot: String,
+        #[arg(long, default_value_t = 3000)]
+        days: u32,
     },
 }
 
@@ -107,6 +125,11 @@ async fn main() -> Result<ExitCode> {
             }
         },
         Command::Record => record_run(&cli.config, &cli.data).await,
+        Command::Research {
+            command: Research::Sync { slot, days },
+        } => research_sync(&cli.config, &cli.data, &slot, days)
+            .await
+            .map(|()| ExitCode::SUCCESS),
         Command::Factors { slot, horizon } => {
             factors(&cli.config, &cli.data, &slot, horizon).map(|()| ExitCode::SUCCESS)
         }
@@ -244,25 +267,92 @@ async fn record_run(config: &Path, data: &Path) -> Result<ExitCode> {
     })
 }
 
+/// Where research bars live: apart from the paper store, because a paper session replays
+/// everything in its store and a longer history there would change how it warms up.
+fn research_dir(data: &Path) -> PathBuf {
+    data.join("research").join("bars")
+}
+
+fn research_store(data: &Path) -> ParquetStore {
+    ParquetStore::new(research_dir(data))
+}
+
+async fn research_sync(config: &Path, data: &Path, slot: &str, days: u32) -> Result<()> {
+    let (slot, _) = load(config, slot)?;
+    let quorum_slots::Universe::Fixed { instruments } = &slot.universe else {
+        bail!("{}: research sync needs a fixed universe for now", slot.id);
+    };
+    if slot.venue.as_str() != "binance" {
+        bail!(
+            "no adapters for venue `{}` yet (binance only)",
+            slot.venue.as_str()
+        );
+    }
+    let market = BinanceSpot::new().context("binance market data")?;
+    let store = research_store(data);
+    let now = chrono::Utc::now();
+    let since = now - chrono::Duration::days(i64::from(days));
+    for instrument in instruments {
+        quorum_data::sync(&market, &store, instrument, &slot.interval, since, now)
+            .await
+            .with_context(|| format!("sync {instrument}"))?;
+        quorum_data::backfill(&market, &store, instrument, &slot.interval, since)
+            .await
+            .with_context(|| format!("backfill {instrument}"))?;
+    }
+    let mut firsts = Vec::new();
+    for instrument in instruments {
+        if let Some(s) = store.load(instrument, &slot.interval)?
+            && let Some(first) = s.bars.first()
+        {
+            firsts.push((
+                first.ts.date_naive(),
+                s.bars.len(),
+                instrument.symbol().to_owned(),
+            ));
+        }
+    }
+    firsts.sort();
+    println!(
+        "{} instruments in {}",
+        firsts.len(),
+        research_dir(data).display()
+    );
+    for (first, bars, symbol) in firsts {
+        println!("  {symbol:<10} from {first}  {bars} bars");
+    }
+    Ok(())
+}
+
 fn factors(config: &Path, data: &Path, slot: &str, horizon: usize) -> Result<()> {
-    use quorum_core::BarStore as _;
     use quorum_lab::factors::{FactorStudyConfig, study};
 
     let (slot, _) = load(config, slot)?;
     let quorum_slots::Universe::Fixed { instruments } = &slot.universe else {
         bail!("{}: factor studies need a fixed universe for now", slot.id);
     };
-    let store = ParquetStore::new(data.join("bars"));
-    let mut series = Vec::new();
-    for instrument in instruments {
-        match store.load(instrument, &slot.interval)? {
-            Some(s) if !s.bars.is_empty() => series.push(s),
-            _ => tracing::warn!(%instrument, "no stored bars; run the paper session once to sync"),
+    let load = |store: &ParquetStore| -> Result<Vec<quorum_core::Series>> {
+        let mut series = Vec::new();
+        for instrument in instruments {
+            if let Some(s) = store.load(instrument, &slot.interval)?
+                && !s.bars.is_empty()
+            {
+                series.push(s);
+            }
         }
+        Ok(series)
+    };
+    let mut series = load(&research_store(data))?;
+    if series.is_empty() {
+        println!(
+            "no research history yet (`quorum research sync --slot {}`); using the paper store",
+            slot.id
+        );
+        series = load(&ParquetStore::new(data.join("bars")))?;
     }
     if series.is_empty() {
         bail!(
-            "no stored bars for {}: run `quorum paper run --slot {}` once",
+            "no stored bars for {}: run `quorum research sync --slot {}`",
             slot.id,
             slot.id
         );

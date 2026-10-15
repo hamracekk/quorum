@@ -46,8 +46,12 @@ allocator (DESIGN §16).
 ## Research
 
 ```bash
-cargo run --release -p quorum-cli -- factors --slot crypto-spot --horizon 7   # factor study → data/factors/
+cargo run --release -p quorum-cli -- research sync --slot crypto-spot --days 3000   # → data/research/bars
+cargo run --release -p quorum-cli -- factors --slot crypto-spot --horizon 7        # → data/factors/
 ```
+
+Research history lives apart from the paper store: a paper session replays everything in its
+store, so a longer history there would change how it warms up.
 
 ## Paper trading
 
