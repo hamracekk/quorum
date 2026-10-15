@@ -30,7 +30,7 @@ pub fn interval_duration(interval: &str) -> Result<Duration> {
 /// universe when configured, and scaled to the book's volatility target when set.
 pub fn strategy(slot: &SlotConfig, instruments: usize) -> Result<Box<dyn Strategy>> {
     let step = interval_duration(&slot.interval)?;
-    let periods_per_year = 365.0 * 86_400.0 / step.num_seconds().max(1) as f64;
+    let periods_per_year = slot.calendar.bars_per_year(step.num_seconds());
     let z = &slot.sizing;
     let sizing = VolTarget {
         target_vol: z.target_vol,
