@@ -11,7 +11,7 @@ can run inside one.
 
 | File | What it holds |
 |---|---|
-| `config.rs` | `SlotId`, `SlotConfig` (parse, validate, `check_envelope`), `Universe` (fixed or point-in-time top volume → `core::strategies::UniverseRule`), `TradingCalendar`, `CostModel` (→ `BacktestConfig`) |
+| `config.rs` | `SlotId`, `SlotConfig` (parse, validate, `check_envelope`), `Universe` (fixed or point-in-time top volume → `core::strategies::UniverseRule`), `StrategySpec` (`trend-momentum`, `xs-momentum`), `Sizing`, `Brakes` (`vol_regime`), `Exits`, `TradingCalendar`, `CostModel` (→ `BacktestConfig`) |
 | `ladder.rs` | `SlotState` (mode, since, halted; serializable), `review` → `Transition`; `Gates` (thresholds), `Evidence` (grouped per gate), `Blocker`, `Trigger` |
 | `config/tests.rs`, `ladder/tests.rs` | Validation, the shipped `config/slots/crypto-spot.toml` inside the shipped envelope, every ladder path |
 

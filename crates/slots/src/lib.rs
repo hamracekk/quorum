@@ -13,7 +13,10 @@
 mod config;
 mod ladder;
 
-pub use config::{CostModel, SlotConfig, SlotConfigError, SlotId, TradingCalendar, Universe};
+pub use config::{
+    Brakes, CostModel, Exits, Sizing, SlotConfig, SlotConfigError, SlotId, StrategySpec,
+    TradingCalendar, Universe, VolRegimeBrake,
+};
 pub use ladder::{
     Alarms, Blocker, Evidence, Gates, LiveRecord, PaperRecord, ResearchRecord, SlotState,
     Transition, Trigger,

@@ -4,7 +4,8 @@ const SLOT: &str = r#"
 id = "crypto-spot"
 venue = "binance"
 interval = "1d"
-strategies = ["trend-momentum"]
+paper_capital = 10000
+strategy = { kind = "trend-momentum", lookback = 60 }
 
 [universe]
 kind = "top-volume"
@@ -38,6 +39,12 @@ fn parses_with_defaults() {
     assert_eq!(slot.start_mode, Mode::Research);
     assert_eq!(slot.calendar, TradingCalendar::AlwaysOpen);
     assert!(slot.costs.impact.abs() < f64::EPSILON);
+    assert_eq!(slot.history_days, 730);
+    assert_eq!(
+        slot.sizing,
+        Sizing::default(),
+        "sizing rules default to off"
+    );
     let rule = slot.universe.top_volume_rule().expect("top volume");
     assert_eq!(
         (rule.size, rule.window, rule.refresh, rule.min_history),
@@ -80,11 +87,35 @@ fn live_start_modes_are_rejected() {
 #[test]
 fn invalid_values_are_rejected() {
     assert!(err(&SLOT.replace(r#"interval = "1d""#, r#"interval = "5m""#)).contains("interval"));
-    assert!(err(&SLOT.replace(r#"["trend-momentum"]"#, "[]")).contains("strategy"));
-    assert!(err(&SLOT.replace(r#"["trend-momentum"]"#, r#"["a", "a"]"#)).contains("twice"));
+    assert!(err(&SLOT.replace("lookback = 60", "lookback = 0")).contains("lookback"));
+    assert!(
+        err(&SLOT.replace("paper_capital = 10000", "paper_capital = 0")).contains("paper_capital")
+    );
     assert!(err(&SLOT.replace("size = 25", "size = 0")).contains("> 0"));
     assert!(err(&SLOT.replace("fee_rate = 0.001", "fee_rate = -0.001")).contains("costs"));
+    let brake = "[brakes.vol_regime]\nratio = 1.5\nscale = 2.0\nshort_bars = 20\nlong_bars = 365";
+    assert!(err(&format!("{SLOT}\n{brake}")).contains("scale"));
+    let flat = brake.replace("ratio = 1.5", "ratio = 0");
+    assert!(err(&format!("{SLOT}\n{flat}")).contains("ratio"));
     assert!(SlotConfig::parse(&SLOT.replace("crypto-spot", "Crypto Spot")).is_err());
+}
+
+#[test]
+fn strategies_are_typed_and_checked() {
+    let xs = SLOT.replace(
+        r#"strategy = { kind = "trend-momentum", lookback = 60 }"#,
+        r#"strategy = { kind = "xs-momentum", lookback = 60, top = 5, rebalance = 7 }"#,
+    );
+    let slot = SlotConfig::parse(&xs).expect("valid");
+    assert_eq!(slot.strategy.name(), "xs-momentum");
+    assert!(err(&xs.replace("top = 5", "top = 0")).contains("top"));
+    let unknown = SLOT.replace("trend-momentum", "moon-shot");
+    assert!(SlotConfig::parse(&unknown).is_err());
+    let extra = SLOT.replace("lookback = 60 }", "lookback = 60, top = 5 }");
+    assert!(
+        SlotConfig::parse(&extra).is_err(),
+        "trend-momentum takes no `top`"
+    );
 }
 
 #[test]

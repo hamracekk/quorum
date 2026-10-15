@@ -69,7 +69,7 @@ pub enum SlotConfigError {
 }
 
 /// Which instruments the slot may trade.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Universe {
     /// A fixed list (survivorship-biased: judge results against buy & hold of the same list).
@@ -106,7 +106,7 @@ impl Universe {
 }
 
 /// When the slot's market trades.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum TradingCalendar {
@@ -117,7 +117,7 @@ pub enum TradingCalendar {
 
 /// Trading costs the slot is judged with — in backtests, paper fills and the ladder's slippage
 /// gate.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CostModel {
     /// Commission per trade as a fraction of notional (0.001 = 0.1%).
@@ -137,10 +137,81 @@ impl CostModel {
     }
 }
 
+/// The strategy a slot runs. One per slot for now; several per slot need a combiner (DESIGN
+/// §5.2) and come with the allocator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum StrategySpec {
+    /// Per instrument: long while the `lookback` return is positive (trader E-1).
+    TrendMomentum { lookback: usize },
+    /// Hold the `top` rising instruments with the best `lookback` return, re-ranked every
+    /// `rebalance` bars (trader E-1).
+    XsMomentum {
+        lookback: usize,
+        top: usize,
+        rebalance: usize,
+    },
+}
+
+impl StrategySpec {
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::TrendMomentum { .. } => "trend-momentum",
+            Self::XsMomentum { .. } => "xs-momentum",
+        }
+    }
+}
+
+/// Position sizing. Zeros switch a rule off.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Sizing {
+    /// Annualised volatility each holding is sized to (`0` = equal weights).
+    pub target_vol: f64,
+    /// Returns behind each holding's realised volatility.
+    pub vol_bars: usize,
+    /// A held weight changes only when the new one differs by more than this fraction.
+    pub band: f64,
+    /// Annualised volatility of the whole book (`0` = off).
+    pub portfolio_vol: f64,
+    /// Bars behind the book's covariance.
+    pub portfolio_vol_bars: usize,
+}
+
+/// Portfolio brakes in the risk manager (trader E-5). A brake left out is off.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Brakes {
+    pub vol_regime: Option<VolRegimeBrake>,
+}
+
+/// Scales every target down while the market is unusually volatile.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VolRegimeBrake {
+    /// Market volatility over `short_bars` above this multiple of its `long_bars` level is a
+    /// high-volatility regime.
+    pub ratio: f64,
+    /// Share of the targets kept in a high-volatility regime, in `[0, 1]`.
+    pub scale: f64,
+    pub short_bars: usize,
+    pub long_bars: usize,
+}
+
+/// Exit rules. Zeros switch a rule off.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Exits {
+    /// A held instrument with no bar for this many timestamps is treated as delisted and sold
+    /// at its last close.
+    pub stale_bars: usize,
+}
+
 const INTERVALS: [&str; 3] = ["1h", "4h", "1d"];
 
 /// The operator's description of a slot (`config/slots/<id>.toml`).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SlotConfig {
     pub id: SlotId,
@@ -148,11 +219,21 @@ pub struct SlotConfig {
     /// Bar interval the strategies run on: `1h`, `4h` or `1d`.
     pub interval: String,
     pub universe: Universe,
-    /// Strategy kinds run in this slot, e.g. `trend-momentum`.
-    pub strategies: Vec<String>,
+    pub strategy: StrategySpec,
+    #[serde(default)]
+    pub sizing: Sizing,
+    #[serde(default)]
+    pub brakes: Brakes,
+    #[serde(default)]
+    pub exits: Exits,
     #[serde(default)]
     pub calendar: TradingCalendar,
     pub costs: CostModel,
+    /// Simulated capital for paper trading. Paper only: real capital comes from the envelope.
+    pub paper_capital: f64,
+    /// Days of history loaded to warm the strategy up before it trades.
+    #[serde(default = "history_days")]
+    pub history_days: u32,
     /// Where a new slot starts: `research` or `paper`. Live modes are reached only through the
     /// ladder.
     #[serde(default = "research")]
@@ -161,6 +242,10 @@ pub struct SlotConfig {
 
 const fn research() -> Mode {
     Mode::Research
+}
+
+const fn history_days() -> u32 {
+    730
 }
 
 impl SlotConfig {
@@ -188,14 +273,42 @@ impl SlotConfig {
                 self.interval
             ));
         }
-        if self.strategies.is_empty() || self.strategies.iter().any(String::is_empty) {
-            return invalid("needs at least one strategy".to_owned());
+        let lookback = match self.strategy {
+            StrategySpec::TrendMomentum { lookback } => lookback,
+            StrategySpec::XsMomentum {
+                lookback,
+                top,
+                rebalance,
+            } => {
+                if top == 0 || rebalance == 0 {
+                    return invalid("xs-momentum top and rebalance must be > 0".to_owned());
+                }
+                lookback
+            }
+        };
+        if lookback == 0 {
+            return invalid("strategy lookback must be > 0".to_owned());
         }
-        let mut sorted = self.strategies.clone();
-        sorted.sort();
-        sorted.dedup();
-        if sorted.len() != self.strategies.len() {
-            return invalid("a strategy is listed twice".to_owned());
+        if !self.paper_capital.is_finite() || self.paper_capital <= 0.0 {
+            return invalid("paper_capital must be > 0".to_owned());
+        }
+        if self.history_days == 0 {
+            return invalid("history_days must be > 0".to_owned());
+        }
+        let z = &self.sizing;
+        if [z.target_vol, z.band, z.portfolio_vol]
+            .iter()
+            .any(|x| !x.is_finite() || *x < 0.0)
+        {
+            return invalid("sizing values must be finite and ≥ 0".to_owned());
+        }
+        if let Some(b) = self.brakes.vol_regime {
+            if !b.ratio.is_finite() || b.ratio <= 0.0 || b.short_bars == 0 || b.long_bars == 0 {
+                return invalid("brakes.vol_regime ratio and bars must be > 0".to_owned());
+            }
+            if !(0.0..=1.0).contains(&b.scale) {
+                return invalid("brakes.vol_regime.scale must be in [0, 1]".to_owned());
+            }
         }
         match &self.universe {
             Universe::Fixed { instruments } => {

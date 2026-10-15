@@ -6,7 +6,8 @@ const SLOT: &str = r#"
 id = "crypto-spot"
 venue = "binance"
 interval = "1d"
-strategies = ["trend-momentum"]
+paper_capital = 10000
+strategy = { kind = "trend-momentum", lookback = 60 }
 start_mode = "paper"
 universe = { kind = "fixed", instruments = ["binance:BTCUSDT"] }
 costs = { fee_rate = 0.001, slippage_bps = 2.0 }
