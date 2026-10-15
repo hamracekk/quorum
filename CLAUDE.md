@@ -22,6 +22,11 @@ change when its module map, invariants or extension steps change.
 - **One engine.** Backtest, replay, paper and live go through `core::Engine`. Never add a second
   simulation loop. `core/tests/golden.rs` pins results bit for bit; change its constants only for
   an intended behaviour change and say so in the commit.
+- **Paper sessions resume by replay.** Never persist engine internals; rebuild by feeding stored
+  bars through a fresh engine, and keep the `journaled_until` watermark so restarts never lose or
+  duplicate a decision. Gaps are backfilled for every instrument together, in time order.
+- **The CLI is the composition root** and the only place that names concrete adapters; logic
+  lives in library crates.
 - **No look-ahead, point in time.** A decision on bar `t` uses only data known at the close of
   `t` and executes at `t+1` or later. Stored values carry when they became known.
 - **Everything earns its weight.** Factors, strategies, prompts, models and slots start at zero
@@ -41,4 +46,7 @@ moon run root:verify        # all gates
 moon run :lint --affected   # only crates you changed (also :test, :fmt)
 moon run core:test          # one task in one crate
 cargo fmt-check / cargo lint / cargo test --workspace --all-features
+cargo run --release -p quorum-cli -- paper run --slot crypto-spot   # paper-trade a slot (resumes)
+cargo run --release -p quorum-cli -- paper status --slot crypto-spot
+cargo run --release -p quorum-cli -- paper stop --slot crypto-spot
 ```

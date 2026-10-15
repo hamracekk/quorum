@@ -1,0 +1,25 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'cli'
+layer: 'application'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'quorum-cli'
+  description: 'The `quorum` command: paper-trade a slot, its status, stop it'
+dependsOn:
+  - 'bus'
+  - 'data'
+  - 'envelope'
+  - 'journal'
+  - 'runner'
+  - 'slots'
+tasks:
+  # Paper-trade the crypto-spot slot (resumes an open session).
+  paper:
+    command: 'cargo run --release -p quorum-cli -- paper run --slot crypto-spot'
+    options:
+      cache: false
+      runInCI: false
+      interactive: true
+      runFromWorkspaceRoot: true

@@ -1,0 +1,15 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'runner'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'quorum-runner'
+  description: 'Paper-trades one slot: history sync, resume by replay, journal, live bars'
+dependsOn:
+  - 'core'
+  - 'bus'
+  - 'envelope'
+  - 'slots'
+  - 'journal'

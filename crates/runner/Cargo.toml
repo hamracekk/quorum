@@ -1,0 +1,26 @@
+[package]
+name = "quorum-runner"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+quorum-bus.workspace = true
+quorum-data.workspace = true
+quorum-core.workspace = true
+quorum-envelope.workspace = true
+quorum-slots.workspace = true
+
+[dev-dependencies]
+quorum-journal.workspace = true
+
+[lints]
+workspace = true

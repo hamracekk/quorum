@@ -37,6 +37,10 @@ tokio-tungstenite = { version = "0.30", features = ["connect", "rustls-tls-webpk
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Run and session ids (UUID v7: time-ordered).
+uuid = { version = "1", features = ["v7"] }
+# Binaries: command line and error context.
+clap = { version = "4", features = ["derive"] }
 wiremock = "0.6"
 quorum-bus = { path = "crates/bus" }
 quorum-core = { path = "crates/core" }
@@ -50,6 +54,7 @@ quorum-lab = { path = "crates/lab" }
 quorum-ml = { path = "crates/ml" }
 quorum-envelope = { path = "crates/envelope" }
 quorum-slots = { path = "crates/slots" }
+quorum-runner = { path = "crates/runner" }
 
 # Centralized lint policy — every crate opts in with `[lints] workspace = true`.
 # Levels are `warn` locally (so dev builds stay usable); `cargo lint` and CI pass

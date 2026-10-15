@@ -26,7 +26,9 @@ evidence; a separate **risk process** enforces the **envelope** the operator set
 | `hyperliquid` | Followed traders, read only | trader |
 | `predictions` | Prediction markets (Kalshi), read only | trader |
 | `envelope` | The operator envelope: capital, loss limits, venues, highest mode per slot; read-only to the system | new |
-| `slots` | Slot config (venue, universe, strategies, costs) and the autonomy ladder | new |
+| `slots` | Slot config (venue, universe, strategy, sizing, brakes, costs) and the autonomy ladder | new |
+| `runner` | Paper-trades one slot: history sync, resume by replay, journal watermark, live bars, gap backfill | new (port of trader's paper daemon) |
+| `cli` | The `quorum` binary and composition root | new |
 
 trader's `service`, `mcp`, `agents`, `server`, `cli`, `app` and dashboard were **not** copied:
 they are built around one paper session and are rebuilt here around slots, the evaluator and the
@@ -38,6 +40,14 @@ allocator (DESIGN §16).
 |---|---|
 | `config/envelope.toml` | The operator envelope. Paper only today |
 | `config/slots/crypto-spot.toml` | Crypto spot slot: daily trend-momentum, top 25 by volume, Binance |
+
+## Paper trading
+
+```bash
+cargo run --release -p quorum-cli -- paper run --slot crypto-spot   # or: moon run cli:paper
+cargo run --release -p quorum-cli -- paper status --slot crypto-spot
+cargo run --release -p quorum-cli -- paper stop --slot crypto-spot
+```
 
 ## Gates
 

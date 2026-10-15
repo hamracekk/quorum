@@ -44,6 +44,12 @@ tasks:
       - 'slots:fmt'
       - 'slots:lint'
       - 'slots:test'
+      - 'runner:fmt'
+      - 'runner:lint'
+      - 'runner:test'
+      - 'cli:fmt'
+      - 'cli:lint'
+      - 'cli:test'
     options:
       cache: false
       runInCI: false
