@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use quorum_core::recorder::{BookFeed, BookSnapshot, Level};
 use quorum_core::{Bar, InstrumentId, InstrumentKind, MarketData, PortError, VenueId};
 use serde_json::Value;
 
@@ -206,6 +207,79 @@ fn parse_row(row: &[Value]) -> Result<Bar> {
     })
 }
 
+/// Levels per side for a book snapshot: weight 50, enough to reach ±2% for most coins.
+const BOOK_LEVELS: &str = "1000";
+/// Retry depth when 1000 levels stop short of ±2% (BTC, ETH: tight books): weight 250, used
+/// for a few symbols only. Bands still beyond the snapshot are recorded as unknown.
+const DEEP_BOOK_LEVELS: &str = "5000";
+/// The farthest depth band the recorder measures, as a fraction.
+const BOOK_REACH: f64 = 0.02;
+
+/// Whether a snapshot reaches `BOOK_REACH` around the mid on both sides.
+fn reaches(bids: &[Level], asks: &[Level]) -> bool {
+    match (bids.first(), bids.last(), asks.first(), asks.last()) {
+        (Some(&(bid, _)), Some(&(low, _)), Some(&(ask, _)), Some(&(high, _))) => {
+            let mid = f64::midpoint(bid, ask);
+            low <= mid * (1.0 - BOOK_REACH) && high >= mid * (1.0 + BOOK_REACH)
+        }
+        _ => true, // an empty side is the summary's to reject, not a reason to fetch more
+    }
+}
+
+fn levels(side: &Value) -> Result<Vec<Level>> {
+    side.as_array()
+        .ok_or_else(|| DataError::Malformed("depth side is not a list".into()))?
+        .iter()
+        .map(|level| {
+            let num = |i: usize| {
+                level[i]
+                    .as_str()
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .ok_or_else(|| DataError::Malformed(format!("depth level {level}")))
+            };
+            Ok((num(0)?, num(1)?))
+        })
+        .collect()
+}
+
+#[async_trait]
+impl BookFeed for BinanceSpot {
+    fn venue(&self) -> &VenueId {
+        &self.venue
+    }
+
+    /// `/api/v3/depth` has no timestamp of its own: `event_time` is when the response arrived.
+    /// A snapshot that stops short of ±2% is fetched once more, deeper.
+    async fn book(&self, symbol: &str) -> std::result::Result<BookSnapshot, PortError> {
+        let fetch = |limit: &'static str| async move {
+            let body: Value = self
+                .client
+                .get(format!("{}/api/v3/depth", self.base_url))
+                .query(&[("symbol", symbol), ("limit", limit)])
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            Ok::<_, DataError>(BookSnapshot {
+                event_time: Utc::now(),
+                bids: levels(&body["bids"])?,
+                asks: levels(&body["asks"])?,
+            })
+        };
+        let context = || format!("binance depth {symbol}");
+        let book = fetch(BOOK_LEVELS)
+            .await
+            .map_err(|e| PortError::adapter(context(), e))?;
+        if reaches(&book.bids, &book.asks) {
+            return Ok(book);
+        }
+        fetch(DEEP_BOOK_LEVELS)
+            .await
+            .map_err(|e| PortError::adapter(context(), e))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -384,5 +458,75 @@ mod tests {
             .await;
         let binance = BinanceSpot::with_base_url(server.uri()).expect("client");
         assert!(binance.check().await.is_err());
+    }
+}
+
+#[cfg(test)]
+mod book_tests {
+    use quorum_core::recorder::BookFeed as _;
+    use serde_json::json;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn depth_snapshots_parse_both_sides_best_first() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v3/depth"))
+            .and(query_param("symbol", "BTCUSDT"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "lastUpdateId": 1,
+                "bids": [["99.9", "1.5"], ["99.0", "2"]],
+                "asks": [["100.1", "0.5"], ["101.0", "3"]]
+            })))
+            .mount(&server)
+            .await;
+        let spot = BinanceSpot::with_base_url(server.uri()).expect("client");
+        let book = spot.book("BTCUSDT").await.expect("book");
+        assert_eq!(book.bids, vec![(99.9, 1.5), (99.0, 2.0)]);
+        assert_eq!(book.asks[1], (101.0, 3.0));
+    }
+
+    #[tokio::test]
+    async fn a_shallow_book_is_fetched_again_deeper() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v3/depth"))
+            .and(query_param("limit", "1000"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "bids": [["99.99", "1"]], "asks": [["100.01", "1"]]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v3/depth"))
+            .and(query_param("limit", "5000"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "bids": [["99.99", "1"], ["97.0", "5"]], "asks": [["100.01", "1"], ["103.0", "5"]]
+            })))
+            .mount(&server)
+            .await;
+        let spot = BinanceSpot::with_base_url(server.uri()).expect("client");
+        let book = spot.book("BTCUSDT").await.expect("book");
+        assert_eq!(book.bids.len(), 2, "the deeper snapshot");
+    }
+
+    #[tokio::test]
+    async fn malformed_or_failed_depth_is_an_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v3/depth"))
+            .and(query_param("symbol", "BAD"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "bids": [["x", "1"]], "asks": [] })),
+            )
+            .mount(&server)
+            .await;
+        let spot = BinanceSpot::with_base_url(server.uri()).expect("client");
+        assert!(spot.book("BAD").await.is_err());
+        assert!(spot.book("MISSING").await.is_err(), "404 from the mock");
     }
 }
