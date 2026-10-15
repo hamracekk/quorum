@@ -49,4 +49,5 @@ cargo fmt-check / cargo lint / cargo test --workspace --all-features
 cargo run --release -p quorum-cli -- paper run --slot crypto-spot   # paper-trade a slot (resumes)
 cargo run --release -p quorum-cli -- paper status --slot crypto-spot
 cargo run --release -p quorum-cli -- paper stop --slot crypto-spot
+./deploy/launchd/install.sh crypto-spot     # run it under launchd (deploy/README.md)
 ```

@@ -17,6 +17,7 @@ use crate::{Result, RunnerError};
 /// - `session.json`: the current or last [`Session`].
 /// - `state.json`: the latest [`StateFile`] for status displays.
 /// - `STOP`: a request to stop the running session (resumable).
+/// - `LOCK`: held by the one process running the slot (released when it exits, crash included).
 #[derive(Debug, Clone)]
 pub struct SlotFiles {
     pub dir: PathBuf,
@@ -48,6 +49,34 @@ impl SlotFiles {
     #[must_use]
     pub fn stop(&self) -> PathBuf {
         self.dir.join("STOP")
+    }
+
+    #[must_use]
+    pub fn lock_path(&self) -> PathBuf {
+        self.dir.join("LOCK")
+    }
+
+    /// Takes the slot's exclusive lock: one writer per slot (a launchd service and a manual run
+    /// cannot both trade it). The OS releases it when the returned file is dropped or the
+    /// process dies.
+    pub(crate) fn lock(&self) -> Result<fs::File> {
+        let path = self.lock_path();
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(io(&path))?;
+        match file.try_lock() {
+            Ok(()) => Ok(file),
+            Err(fs::TryLockError::WouldBlock) => Err(RunnerError::Refused(format!(
+                "another quorum process is running this slot ({} is locked)",
+                path.display()
+            ))),
+            Err(fs::TryLockError::Error(source)) => Err(RunnerError::Io {
+                path: path.display().to_string(),
+                source,
+            }),
+        }
     }
 
     pub(crate) fn create(&self) -> Result<()> {

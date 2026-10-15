@@ -55,6 +55,15 @@ pub enum Status {
     StreamEnded,
 }
 
+impl Status {
+    /// Whether a supervisor should start the run again: a stream that ended is a transient
+    /// failure; a requested stop is not.
+    #[must_use]
+    pub const fn restart(self) -> bool {
+        matches!(self, Self::StreamEnded)
+    }
+}
+
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -87,6 +96,7 @@ pub async fn run(
     let step = interval_duration(&slot.interval)?;
     let files = SlotFiles::new(&options.data, &slot.id);
     files.create()?;
+    let _lock = files.lock()?; // held until the run returns
     preflight(ports, slot, envelope, &files, options.now)?;
     let instruments = instruments(slot)?;
     let (session, resumed) = open_session(&files, slot, &instruments, options, step)?;

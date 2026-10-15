@@ -1,7 +1,9 @@
 //! `quorum`: the command line, and the composition root — the only place that names concrete
 //! adapters (Binance, Parquet, SQLite, JSONL). Logic lives in the library crates.
 
+use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -63,26 +65,57 @@ enum Paper {
     },
 }
 
+/// Exit code for a run a supervisor should start again (the live stream ended):
+/// `EX_TEMPFAIL`. A requested stop exits 0, so launchd leaves the service down.
+const RESTART: u8 = 75;
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<ExitCode> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .with_writer(std::io::stderr)
+        // Colour codes only on a terminal; log files (launchd) stay plain text.
+        .with_ansi(std::io::stderr().is_terminal())
         .init();
     let cli = Cli::parse();
     match cli.command {
         Command::Paper { command } => match command {
             Paper::Run { slot, fresh } => paper_run(&cli.config, &cli.data, &slot, fresh).await,
-            Paper::Status { slot } => paper_status(&cli.data, &slot),
+            Paper::Status { slot } => paper_status(&cli.data, &slot).map(|()| ExitCode::SUCCESS),
             Paper::Stop { slot } => {
                 let path = request_stop(&SlotFiles::new(&cli.data, &slot_id(&slot)?))?;
                 println!("stop requested ({})", path.display());
-                Ok(())
+                Ok(ExitCode::SUCCESS)
             }
         },
+    }
+}
+
+/// Resolves on Ctrl+C or SIGTERM (`launchctl bootout`, `kill`), whichever comes first.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            tracing::error!(error = %err, "Ctrl+C handler failed");
+            std::future::pending::<()>().await;
+        }
+    };
+    let term = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut term) => {
+                term.recv().await;
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "SIGTERM handler failed");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    tokio::select! {
+        () = ctrl_c => tracing::info!("Ctrl+C: stopping"),
+        () = term => tracing::info!("SIGTERM: stopping"),
     }
 }
 
@@ -123,20 +156,14 @@ async fn ports(slot: &SlotConfig, data: &Path) -> Result<Ports> {
     })
 }
 
-async fn paper_run(config: &Path, data: &Path, slot: &str, fresh: bool) -> Result<()> {
+async fn paper_run(config: &Path, data: &Path, slot: &str, fresh: bool) -> Result<ExitCode> {
     let (slot, envelope) = load(config, slot)?;
     let ports = ports(&slot, data).await?;
     let options = RunOptions {
         fresh,
         ..RunOptions::new(data.to_path_buf())
     };
-    let shutdown = async {
-        if let Err(err) = tokio::signal::ctrl_c().await {
-            tracing::error!(error = %err, "Ctrl+C handler failed; stop with `quorum paper stop`");
-            std::future::pending::<()>().await;
-        }
-    };
-    let outcome = run(&ports, &slot, &envelope, &options, shutdown).await?;
+    let outcome = run(&ports, &slot, &envelope, &options, shutdown_signal()).await?;
     println!(
         "{} session {} ({}): {} live bars, equity {:.2}, resume with `quorum paper run --slot {}`",
         outcome.status,
@@ -146,8 +173,16 @@ async fn paper_run(config: &Path, data: &Path, slot: &str, fresh: bool) -> Resul
         outcome.equity,
         slot.id
     );
-    Ok(())
+    Ok(if outcome.status.restart() {
+        ExitCode::from(RESTART)
+    } else {
+        ExitCode::SUCCESS
+    })
 }
+
+/// A running session writes `state.json` at least every heartbeat (10 s); older than this means
+/// the process is gone, hung or asleep.
+const STALE_SECS: i64 = 120;
 
 fn paper_status(data: &Path, slot: &str) -> Result<()> {
     let files = SlotFiles::new(data, &slot_id(slot)?);
@@ -165,10 +200,15 @@ fn paper_status(data: &Path, slot: &str) -> Result<()> {
         None => println!("journaled nothing yet"),
     }
     if let Some(state) = files.load_state()? {
+        let age = (chrono::Utc::now() - state.heartbeat).num_seconds();
+        let stale = if state.status == "running" && age > STALE_SECS {
+            "  STALE (not running, hung or asleep)"
+        } else {
+            ""
+        };
         println!(
-            "state     {} at {}  equity {:.2}  cash {:.2}  positions {}  live bars {}{}",
+            "state     {}{stale} {age}s ago  equity {:.2}  cash {:.2}  positions {}  live bars {}{}",
             state.status,
-            state.heartbeat,
             state.equity,
             state.cash,
             state.positions,

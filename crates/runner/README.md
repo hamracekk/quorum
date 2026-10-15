@@ -15,7 +15,7 @@ trader's paper daemon, scoped to a slot and its envelope.
 
 ## A run
 
-1. **Preflight.** Venue in the envelope; ports on the slot's venue; the slot's ladder state
+1. **Lock** the slot (one writer). **Preflight.** Venue in the envelope; ports on the slot's venue; the slot's ladder state
    (`slot.json`) reviewed against the envelope (a lowered envelope demotes it); halted or below
    `paper` → refused.
 2. **Open or resume** the slot's open session. A changed slot config needs `--fresh`.
@@ -38,6 +38,10 @@ trader's paper daemon, scoped to a slot and its envelope.
 - **Paper only.** Fills come from the engine's `PaperBroker`; there is no order path to a venue.
 - **The envelope's daily loss limit** is the engine's kill switch for the day.
 - A stop leaves the session open; the next run resumes it.
+- **One process per slot.** A run holds `<data>/slots/<id>/LOCK` (an OS file lock, released on
+  exit or crash); a second run of the same slot is refused.
+- `Status::restart` says whether a supervisor should start the run again (an ended stream, yes;
+  a requested stop, no).
 
 ## Not yet (later P0 / P1)
 

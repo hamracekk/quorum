@@ -49,6 +49,13 @@ cargo run --release -p quorum-cli -- paper status --slot crypto-spot
 cargo run --release -p quorum-cli -- paper stop --slot crypto-spot
 ```
 
+Unattended on the laptop (launchd: start at login, restart on failure, logs): see
+[deploy/README.md](deploy/README.md).
+
+```bash
+./deploy/launchd/install.sh crypto-spot
+```
+
 ## Gates
 
 ```bash

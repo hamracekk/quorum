@@ -427,3 +427,42 @@ async fn a_venue_outside_the_envelope_is_refused() {
     .expect_err("refused");
     assert!(err.to_string().contains("venues_allowed"), "{err}");
 }
+
+#[tokio::test]
+async fn a_second_process_cannot_run_the_same_slot() {
+    let w = World::new("locked").await;
+    let files = SlotFiles::new(&w.data, &slot().id);
+    std::fs::create_dir_all(&files.dir).expect("dir");
+    let holder = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(files.lock_path())
+        .expect("lock file");
+    holder.try_lock().expect("first writer");
+    let err = run(
+        &w.ports(30, Vec::new()),
+        &slot(),
+        &envelope(),
+        &w.options(day(30)),
+        std::future::pending(),
+    )
+    .await
+    .expect_err("second writer refused");
+    assert!(err.to_string().contains("another quorum process"), "{err}");
+    drop(holder);
+    run(
+        &w.ports(30, Vec::new()),
+        &slot(),
+        &envelope(),
+        &w.options(day(30)),
+        std::future::pending(),
+    )
+    .await
+    .expect("runs once the lock is free");
+}
+
+#[test]
+fn only_an_ended_stream_asks_for_a_restart() {
+    assert!(Status::StreamEnded.restart());
+    assert!(!Status::Stopped.restart());
+}
