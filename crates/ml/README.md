@@ -1,6 +1,6 @@
-# crates/ml (`trader-ml`)
+# crates/ml (`quorum-ml`)
 
-Machine-learned signal sources (M9). Models are `trader_core::strategies::Learner`s: they plug
+Machine-learned signal sources (M9). Models are `quorum_core::strategies::Learner`s: they plug
 into the cross-sectional scaffold (`XsLearner`), which labels each weekly snapshot of features
 with the return realised by the next rebalance and trains only on labelled snapshots, so a model
 never learns from the future. Every model is judged like any strategy — walk-forward, out of
@@ -18,7 +18,7 @@ sample, after costs, with PBO — against the linear benchmark `xs-ridge`.
   checks that later bars cannot change earlier targets.
 - **Deterministic:** no randomness, ties broken by order — the same bars give the same trees, so
   replays and the paper replay check hold.
-- **No I/O, no new dependencies:** pure computation on `trader-core` types.
+- **No I/O, no new dependencies:** pure computation on `quorum-core` types.
 - A model earns nothing by existing: it is a strategy kind (`[strategy] kind = "xs-boost"`)
   for backtests, walk-forward and the tournament; paper changes only through the tournament.
 
@@ -34,6 +34,6 @@ anything else.
 Walk-forward on 25 coins (2026-10-14): Sharpe 0.40, PBO 93% — rejected against ridge (0.77)
 and trend-momentum (1.18); see PLAN M9.
 
-`cargo test -p trader-ml`: trees learn a U-shape a line cannot, the same data gives bit-identical
+`cargo test -p quorum-ml`: trees learn a U-shape a line cannot, the same data gives bit-identical
 trees, too few samples fit nothing, one extreme label does not move predictions, and as a
 strategy it holds the rising coins without look-ahead.

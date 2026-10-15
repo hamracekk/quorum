@@ -7,9 +7,9 @@
 //! look-ahead that also made sizes depend on feed order).
 
 use chrono::{DateTime, Utc};
-use trader_core::risk::RiskLimits;
-use trader_core::strategies::{PerInstrument, SmaCross};
-use trader_core::{BacktestConfig, Bar, InstrumentId, Series, run};
+use quorum_core::risk::RiskLimits;
+use quorum_core::strategies::{PerInstrument, SmaCross};
+use quorum_core::{BacktestConfig, Bar, InstrumentId, Series, run};
 
 /// Deterministic pseudo-random walk (64-bit LCG), so the test needs no data files.
 fn walk(symbol: &str, seed: u64, bars: i64) -> Series {

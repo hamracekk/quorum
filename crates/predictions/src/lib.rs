@@ -13,10 +13,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use quorum_core::predictions::{PredictionMarket, ProbabilityPoint};
+use quorum_core::{PortError, PredictionSource};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use trader_core::predictions::{PredictionMarket, ProbabilityPoint};
-use trader_core::{PortError, PredictionSource};
 
 /// Public API root.
 pub const KALSHI_API: &str = "https://api.elections.kalshi.com/trade-api/v2";
@@ -27,7 +27,7 @@ pub const MAX_BYTES: usize = 5 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(20);
 /// Hourly candles per history request (Kalshi caps one request at 5000 periods).
 const CHUNK_HOURS: i64 = 4_000;
-const AGENT: &str = concat!("trader/", env!("CARGO_PKG_VERSION"), " (local research)");
+const AGENT: &str = concat!("quorum/", env!("CARGO_PKG_VERSION"), " (local research)");
 
 #[derive(Debug, thiserror::Error)]
 pub enum PredictionError {

@@ -1,0 +1,12 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'slots'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'quorum-slots'
+  description: 'Slots: one market on one venue, its configuration and its autonomy ladder'
+dependsOn:
+  - 'core'
+  - 'envelope'

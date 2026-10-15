@@ -5,5 +5,5 @@ language: 'rust'
 stack: 'backend'
 tags: ['rust']
 project:
-  name: 'trader-core'
+  name: 'quorum-core'
   description: 'Domain types, strategies, broker, risk, metrics, backtest engine'

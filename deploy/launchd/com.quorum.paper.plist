@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- One slot's paper session under launchd (macOS): started at login, restarted after a crash,
+     an error or an ended stream (non-zero exit), left down after `quorum paper stop` (exit 0).
+     install.sh replaces __REPO__, __LOGS__ and __SLOT__. Paper only: no real orders, no keys. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.quorum.paper.__SLOT__</string>
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/target/release/quorum</string>
+    <string>paper</string>
+    <string>run</string>
+    <string>--slot</string>
+    <string>__SLOT__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>RUST_LOG</key>
+    <string>info</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <!-- At most one restart a minute: a failure that repeats (a refused config) does not spin,
+       and the service picks the fix up within a minute of it. -->
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+  <!-- Background work: launchd may defer it on battery, never kills it for being idle. -->
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__LOGS__/paper-__SLOT__.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOGS__/paper-__SLOT__.log</string>
+</dict>
+</plist>

@@ -9,8 +9,8 @@
 //!   year — bull above +20%, bear below −20%, sideways between — and the strategy and the
 //!   benchmark are scored within each: does the edge come from one kind of market only?
 
+use quorum_core::EquityPoint;
 use serde::Serialize;
-use trader_core::EquityPoint;
 
 use crate::validation::{periods_per_year, returns_matrix};
 

@@ -1,9 +1,9 @@
-use trader_core::InstrumentId;
-use trader_core::agents::{
+use quorum_core::InstrumentId;
+use quorum_core::agents::{
     AgentControl, Evidence, FindingKind, FindingQuery, FindingStatus, Hypothesis, MessageQuery,
     NewFinding, NewMessage, OPERATOR, Verdict,
 };
-use trader_core::signals::Signal;
+use quorum_core::signals::Signal;
 
 use super::*;
 
@@ -475,7 +475,7 @@ async fn reports_are_stored_with_their_facts_newest_first() {
 
 #[tokio::test]
 async fn suggestions_are_stored_decided_and_replayed_per_session() {
-    use trader_core::suggestions::{NewSuggestion, Side, Status};
+    use quorum_core::suggestions::{NewSuggestion, Side, Status};
     let journal = SqliteJournal::in_memory().await.expect("journal");
     let new = NewSuggestion {
         instrument: btc(),

@@ -5,7 +5,7 @@ language: 'rust'
 stack: 'backend'
 tags: ['rust']
 project:
-  name: 'trader-ai'
+  name: 'quorum-ai'
   description: 'LLM providers (Claude API, Ollama) and structured news-event extraction'
 dependsOn:
   - 'core'

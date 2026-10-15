@@ -1,5 +1,5 @@
 [package]
-name = "trader-ai"
+name = "quorum-ai"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -13,7 +13,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-trader-core.workspace = true
+quorum-core.workspace = true
 
 [dev-dependencies]
 wiremock.workspace = true

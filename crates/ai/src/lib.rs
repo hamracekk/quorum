@@ -1,4 +1,4 @@
-//! Language models for trader (M5b): the [`LlmProvider`](trader_core::ports::LlmProvider)
+//! Language models for trader (M5b): the [`LlmProvider`](quorum_core::ports::LlmProvider)
 //! adapters and the news-event extraction contract.
 //!
 //! - [`ollama::OllamaProvider`]: local and free, the first pass over every news item.

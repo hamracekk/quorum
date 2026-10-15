@@ -1,5 +1,5 @@
 [package]
-name = "trader-data"
+name = "quorum-data"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -23,7 +23,7 @@ tokio.workspace = true
 tokio-stream.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
-trader-core.workspace = true
+quorum-core.workspace = true
 zip.workspace = true
 
 [dev-dependencies]

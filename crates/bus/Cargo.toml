@@ -1,5 +1,5 @@
 [package]
-name = "trader-bus"
+name = "quorum-bus"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -10,7 +10,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-trader-core.workspace = true
+quorum-core.workspace = true
 
 [lints]
 workspace = true

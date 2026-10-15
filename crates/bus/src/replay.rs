@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use trader_core::{
+use quorum_core::{
     BacktestConfig, BacktestResult, Bar, Engine, EngineError, Event, EventLog, InstrumentId,
     PortError, Strategy,
 };
@@ -53,8 +53,8 @@ pub fn replay(
 
 #[cfg(test)]
 mod tests {
-    use trader_core::fakes::MemoryEventLog;
-    use trader_core::strategies::BuyAndHold;
+    use quorum_core::fakes::MemoryEventLog;
+    use quorum_core::strategies::BuyAndHold;
 
     use super::*;
 

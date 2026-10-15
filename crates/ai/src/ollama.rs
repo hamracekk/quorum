@@ -6,10 +6,10 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use quorum_core::PortError;
+use quorum_core::ports::{LlmProvider, LlmRequest, LlmResponse};
 use serde::Deserialize;
 use serde_json::json;
-use trader_core::PortError;
-use trader_core::ports::{LlmProvider, LlmRequest, LlmResponse};
 
 pub const DEFAULT_URL: &str = "http://127.0.0.1:11434";
 const TIMEOUT: Duration = Duration::from_mins(3);

@@ -1,8 +1,6 @@
 # Short aliases mirroring the CI gates:
 #   cargo lint       strict clippy, warnings are errors
 #   cargo fmt-check  formatting check without writing
-#   cargo trader …   the `trader` CLI in release mode (the workspace has two binaries)
 [alias]
 lint = "clippy --workspace --all-targets --all-features -- -D warnings"
 fmt-check = "fmt --all --check"
-trader = "run --release -p trader-cli --"

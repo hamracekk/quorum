@@ -3,7 +3,7 @@ use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
-use trader_core::chat::{ChatMessage, ToolSpec};
+use quorum_core::chat::{ChatMessage, ToolSpec};
 
 fn request() -> LlmRequest {
     LlmRequest {

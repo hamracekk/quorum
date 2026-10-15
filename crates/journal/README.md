@@ -1,4 +1,4 @@
-# trader-journal (`journal`)
+# quorum-journal (`journal`)
 
 The journal (ADR 0002): a SQLite record of **decisions and executions, grouped by run**
 (backtest, replay, paper, live). Implements the `Journal` port.
@@ -32,12 +32,12 @@ The journal (ADR 0002): a SQLite record of **decisions and executions, grouped b
 
 Timestamps are RFC 3339 UTC with milliseconds (`2026-09-30T12:00:00.000Z`) so text order is time
 order; instruments use their text form (`binance:BTCUSDT`). Bars are not journaled — they live in
-the bar store and the event log. File: `<data dir>/trader.db`, WAL mode, foreign keys on.
+the bar store and the event log. File: `<data dir>/quorum.db`, WAL mode, foreign keys on.
 
 Ad-hoc analysis works with plain SQL:
 
 ```bash
-sqlite3 data/trader.db "SELECT r.label, COUNT(f.id), SUM(f.fee) FROM runs r LEFT JOIN fills f ON f.run_id = r.id GROUP BY r.id"
+sqlite3 data/quorum.db "SELECT r.label, COUNT(f.id), SUM(f.fee) FROM runs r LEFT JOIN fills f ON f.run_id = r.id GROUP BY r.id"
 ```
 
 ## Rules
@@ -58,7 +58,7 @@ sqlite3 data/trader.db "SELECT r.label, COUNT(f.id), SUM(f.fee) FROM runs r LEFT
 ## Testing
 
 ```bash
-moon run journal:test     # or: cargo test -p trader-journal
+moon run journal:test     # or: cargo test -p quorum-journal
 ```
 
 Tests use `SqliteJournal::in_memory()`; one test exercises a real file (WAL mode, reopen,

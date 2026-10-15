@@ -15,8 +15,8 @@
 //!   out-of-sample paths, giving a distribution of Sharpes instead of one number.
 
 use chrono::{DateTime, Utc};
+use quorum_core::{BacktestConfig, EquityPoint, Series, run};
 use serde::Serialize;
-use trader_core::{BacktestConfig, EquityPoint, Series, run};
 
 use crate::StrategyFactory;
 

@@ -9,7 +9,7 @@ use parquet::arrow::ArrowWriter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
-use trader_core::{Bar, BarStore, InstrumentId, InstrumentKind, PortError, Series, VenueId};
+use quorum_core::{Bar, BarStore, InstrumentId, InstrumentKind, PortError, Series, VenueId};
 
 use crate::{DataError, Result};
 
@@ -229,7 +229,7 @@ mod tests {
     }
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("trader-test-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("quorum-test-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir); // stale leftovers from an earlier run, if any
         dir
     }

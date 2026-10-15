@@ -11,13 +11,13 @@ use async_trait::async_trait;
 use chrono::DateTime;
 use futures_core::stream::BoxStream;
 use futures_util::{SinkExt, StreamExt};
+use quorum_core::{
+    Bar, InstrumentId, InstrumentKind, MarketStream, PortError, StreamedBar, VenueId,
+};
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::tungstenite::Message;
-use trader_core::{
-    Bar, InstrumentId, InstrumentKind, MarketStream, PortError, StreamedBar, VenueId,
-};
 
 use crate::binance::VENUE;
 use crate::{DataError, Result};

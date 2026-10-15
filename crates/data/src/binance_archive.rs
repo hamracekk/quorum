@@ -9,7 +9,7 @@ use std::io::{Cursor, Read};
 use std::time::Duration;
 
 use chrono::DateTime;
-use trader_core::Bar;
+use quorum_core::Bar;
 
 use crate::{DataError, Result};
 
@@ -32,7 +32,7 @@ impl BinanceArchive {
     /// Point at other hosts, e.g. a local mock server.
     pub fn with_urls(listing_url: impl Into<String>, files_url: impl Into<String>) -> Result<Self> {
         let client = reqwest::Client::builder()
-            .user_agent("trader/0.1")
+            .user_agent("quorum/0.1")
             .timeout(Duration::from_mins(1))
             .build()?;
         Ok(Self {

@@ -7,8 +7,8 @@
 //! updating). It reports; it never edits data.
 
 use chrono::{DateTime, Duration, Utc};
+use quorum_core::{InstrumentId, Series};
 use serde::Serialize;
-use trader_core::{InstrumentId, Series};
 
 /// A single-bar move this large (as a fraction) is flagged.
 pub const OUTLIER_MOVE: f64 = 0.5;
@@ -105,7 +105,7 @@ pub fn check(series: &Series, interval: Duration) -> QualityReport {
 
 #[cfg(test)]
 mod tests {
-    use trader_core::Bar;
+    use quorum_core::Bar;
 
     use super::*;
 

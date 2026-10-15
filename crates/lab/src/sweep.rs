@@ -1,5 +1,5 @@
+use quorum_core::{BacktestConfig, Report, Series, run};
 use serde::Serialize;
-use trader_core::{BacktestConfig, Report, Series, run};
 
 use crate::StrategyFactory;
 
@@ -40,8 +40,8 @@ pub fn sweep<P: Clone>(
 
 #[cfg(test)]
 mod tests {
-    use trader_core::Strategy;
-    use trader_core::strategies::SmaCross;
+    use quorum_core::Strategy;
+    use quorum_core::strategies::SmaCross;
 
     use super::*;
     use crate::walk_forward::tests::trending_series;

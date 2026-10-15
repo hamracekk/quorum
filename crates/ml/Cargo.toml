@@ -1,12 +1,12 @@
 [package]
-name = "trader-ml"
+name = "quorum-ml"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 description = "Machine-learned signal sources (M9): gradient-boosted trees as cross-sectional learners"
 
 [dependencies]
-trader-core.workspace = true
+quorum-core.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true

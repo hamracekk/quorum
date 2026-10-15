@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
+use quorum_core::impact::{ImpactLink, ImpactTheme};
+use quorum_core::news::{Direction, Horizon};
 use serde_json::{Value, json};
-use trader_core::impact::{ImpactLink, ImpactTheme};
-use trader_core::news::{Direction, Horizon};
 
 use super::*;
 

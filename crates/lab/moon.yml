@@ -5,7 +5,7 @@ language: 'rust'
 stack: 'backend'
 tags: ['rust']
 project:
-  name: 'trader-lab'
+  name: 'quorum-lab'
   description: 'Research: parameter sweeps and walk-forward evaluation'
 dependsOn:
   - 'core'

@@ -24,7 +24,7 @@ pub use error::{DataError, Result};
 pub use store::{ParquetStore, read_parquet, write_parquet};
 
 use chrono::{DateTime, Duration, Utc};
-use trader_core::{BarStore, InstrumentId, MarketData, PortError, Series};
+use quorum_core::{BarStore, InstrumentId, MarketData, PortError, Series};
 
 /// Result of a [`sync`] call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,8 +71,8 @@ pub async fn sync(
 
 #[cfg(test)]
 mod tests {
-    use trader_core::fakes::{MemoryBarStore, MemoryMarketData};
-    use trader_core::{Bar, VenueId};
+    use quorum_core::fakes::{MemoryBarStore, MemoryMarketData};
+    use quorum_core::{Bar, VenueId};
 
     use super::*;
 

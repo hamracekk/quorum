@@ -5,7 +5,7 @@ language: 'rust'
 stack: 'backend'
 tags: ['rust']
 project:
-  name: 'trader-ml'
+  name: 'quorum-ml'
   description: 'Machine-learned signal sources: gradient-boosted trees as cross-sectional learners'
 dependsOn:
   - 'core'

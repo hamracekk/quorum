@@ -5,7 +5,7 @@ language: 'rust'
 stack: 'backend'
 tags: ['rust']
 project:
-  name: 'trader-bus'
+  name: 'quorum-bus'
   description: 'Event log (JSONL), in-process bus, deterministic replay'
 dependsOn:
   - 'core'

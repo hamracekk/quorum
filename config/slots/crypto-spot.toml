@@ -1,0 +1,53 @@
+# Crypto spot slot (DESIGN §5.2): trader's daily trend-momentum paper strategy, ported as is
+# (trader config/daily-trend.toml; walk-forward 2019–2026 in trader PLAN §9 E-1, E-5 and ADR 0007).
+# Binance supplies data and paper fills; the envelope allows paper only.
+
+id = "crypto-spot"
+venue = "binance"
+interval = "1d"
+calendar = "always-open"
+
+# Starts in paper: trader's walk-forward record is the research evidence. Live modes are
+# reached only through the ladder, and only as far as config/envelope.toml allows.
+start_mode = "paper"
+paper_capital = 10000   # simulated EUR-equivalent; quotes are in USDT
+history_days = 730      # warm-up: the volatility brake needs a year of bars
+
+# The 25 coins trader paper-trades. Today's survivors: judge results against buy & hold of the
+# same list. A point-in-time top-volume universe replaces this once all USDT pairs are synced.
+[universe]
+kind = "fixed"
+instruments = [
+  "binance:BTCUSDT", "binance:ETHUSDT", "binance:BNBUSDT", "binance:XRPUSDT", "binance:ADAUSDT",
+  "binance:DOGEUSDT", "binance:SOLUSDT", "binance:TRXUSDT", "binance:AVAXUSDT", "binance:LINKUSDT",
+  "binance:DOTUSDT", "binance:LTCUSDT", "binance:BCHUSDT", "binance:NEARUSDT", "binance:UNIUSDT",
+  "binance:ATOMUSDT", "binance:ETCUSDT", "binance:XLMUSDT", "binance:FILUSDT", "binance:AAVEUSDT",
+  "binance:ALGOUSDT", "binance:INJUSDT", "binance:HBARUSDT", "binance:VETUSDT", "binance:ICPUSDT",
+]
+
+[strategy]
+kind = "trend-momentum"
+lookback = 60           # 60-day momentum (walk-forward picked 30–60 most often)
+
+[sizing]
+target_vol = 0.6        # each coin sized to ~60% annualised volatility
+vol_bars = 30
+band = 0.25             # resize only when a weight moves by more than 25%
+portfolio_vol = 0.35    # whole book ≤ 35%/yr from the coins' 60-day covariance
+portfolio_vol_bars = 60
+
+# Halve every position while the market's 20-day volatility is above 1.5× its one-year level
+# (walk-forward Sharpe 1.20 vs 1.17, drawdown 52.8% vs 55.0%). A drawdown brake tested worse.
+[brakes.vol_regime]
+ratio = 1.5
+scale = 0.5
+short_bars = 20
+long_bars = 365
+
+[exits]
+stale_bars = 5          # no daily bar for 5 days: treated as delisted, sold at the last close
+
+[costs]
+fee_rate = 0.001        # Binance VIP 0 spot
+slippage_bps = 2.0
+impact = 0.05           # square-root law, conservative (trader E-3)

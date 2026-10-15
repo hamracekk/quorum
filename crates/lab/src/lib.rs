@@ -26,7 +26,7 @@ pub use walk_forward::{
 };
 
 use chrono::{DateTime, Utc};
-use trader_core::{Series, Strategy};
+use quorum_core::{Series, Strategy};
 
 /// Builds a fresh strategy instance from a parameter set.
 pub trait StrategyFactory<P> {

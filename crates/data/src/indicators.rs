@@ -48,7 +48,7 @@ impl Indicators {
         coinbase: impl Into<String>,
     ) -> Result<Self> {
         let client = reqwest::Client::builder()
-            .user_agent("trader/0.1")
+            .user_agent("quorum/0.1")
             .timeout(Duration::from_secs(30))
             .build()?;
         Ok(Self {

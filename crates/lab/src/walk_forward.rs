@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
+use quorum_core::{BacktestConfig, BacktestResult, EquityPoint, Report, Series, run, run_from};
 use serde::Serialize;
-use trader_core::{BacktestConfig, BacktestResult, EquityPoint, Report, Series, run, run_from};
 
 use crate::{LabError, StrategyFactory, slice_all};
 
@@ -188,8 +188,8 @@ fn scaled(curve: &[EquityPoint], scale: f64) -> impl Iterator<Item = EquityPoint
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use trader_core::strategies::SmaCross;
-    use trader_core::{Bar, InstrumentId, Strategy};
+    use quorum_core::strategies::SmaCross;
+    use quorum_core::{Bar, InstrumentId, Strategy};
 
     use super::*;
 

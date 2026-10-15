@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
-use trader_core::strategies::Ridge;
-use trader_core::{Bar, InstrumentId, Strategy};
+use quorum_core::strategies::Ridge;
+use quorum_core::{Bar, InstrumentId, Strategy};
 
 use super::*;
 

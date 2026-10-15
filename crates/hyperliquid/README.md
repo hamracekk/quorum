@@ -1,4 +1,4 @@
-# trader-hyperliquid
+# quorum-hyperliquid
 
 Followed traders, read only (SRC-3): Hyperliquid behind the `TraderSource` port.
 
@@ -17,8 +17,8 @@ Followed traders, read only (SRC-3): Hyperliquid behind the `TraderSource` port.
 - **Untrusted input:** addresses must be `0x` + 40 hex digits (lower-cased); numbers are parsed
   strictly and unparseable rows skipped; responses are capped at 10 MB.
 
-Turning fills into calls is `trader_core::traders::calls`; mapping coins to instruments and
-scoring is `trader-service::traders`.
+Turning fills into calls is `quorum_core::traders::calls`; mapping coins to instruments and
+scoring is the service layer (not copied; rebuilt in quorum).
 
 | File | What |
 |---|---|

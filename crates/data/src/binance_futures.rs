@@ -6,8 +6,8 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use quorum_core::derivatives::FundingPoint;
 use serde_json::Value;
-use trader_core::derivatives::FundingPoint;
 
 use crate::{DataError, Result};
 
@@ -29,7 +29,7 @@ impl BinanceFutures {
     /// Point at a different host, e.g. a local mock server.
     pub fn with_base_url(base_url: impl Into<String>) -> Result<Self> {
         let client = reqwest::Client::builder()
-            .user_agent("trader/0.1")
+            .user_agent("quorum/0.1")
             .timeout(Duration::from_secs(30))
             .build()?;
         Ok(Self {
