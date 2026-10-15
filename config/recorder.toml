@@ -1,0 +1,17 @@
+# The forward recorder (DESIGN §6, P1): data with little or no public history, recorded from now
+# on into data/recorder/<feed>/<YYYY-MM-DD>.jsonl. Binance public endpoints only, keyless,
+# read-only. Runs as its own process (`quorum record`), apart from trading.
+
+# Record every instrument of these slots, plus any symbols listed below.
+slots = ["crypto-spot"]
+symbols = []
+
+# Spot order-book summary per symbol (spread, depth within ±0.1/0.5/1/2%, imbalance).
+# 1000 levels per call (weight 50): 25 symbols every 5 minutes is far inside the limits.
+book_every_secs = 300
+
+# Perpetual mark, index, basis, funding estimate and open interest per symbol.
+derivs_every_secs = 300
+
+# Every liquidation on Binance USDT perpetuals, as it happens (no REST history exists).
+liquidations = true

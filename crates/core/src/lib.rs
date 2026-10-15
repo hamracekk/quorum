@@ -21,6 +21,7 @@ pub mod order;
 pub mod patterns;
 pub mod ports;
 pub mod predictions;
+pub mod recorder;
 pub mod risk;
 pub mod signals;
 pub mod sizing;

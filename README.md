@@ -28,6 +28,7 @@ evidence; a separate **risk process** enforces the **envelope** the operator set
 | `envelope` | The operator envelope: capital, loss limits, venues, highest mode per slot; read-only to the system | new |
 | `slots` | Slot config (venue, universe, strategy, sizing, brakes, costs) and the autonomy ladder | new |
 | `runner` | Paper-trades one slot: history sync, resume by replay, journal watermark, live bars, gap backfill | new (port of trader's paper daemon) |
+| `recorder` | Forward recorder: liquidations, book depth, derivatives snapshots to daily JSONL, gaps marked | new |
 | `cli` | The `quorum` binary and composition root | new |
 
 trader's `service`, `mcp`, `agents`, `server`, `cli`, `app` and dashboard were **not** copied:
@@ -39,7 +40,8 @@ allocator (DESIGN §16).
 | File | What it is |
 |---|---|
 | `config/envelope.toml` | The operator envelope. Paper only today |
-| `config/slots/crypto-spot.toml` | Crypto spot slot: daily trend-momentum, top 25 by volume, Binance |
+| `config/slots/crypto-spot.toml` | Crypto spot slot: daily trend-momentum, 25 coins, Binance |
+| `config/recorder.toml` | What the forward recorder records and how often |
 
 ## Paper trading
 
@@ -53,7 +55,8 @@ Unattended on the laptop (launchd: start at login, restart on failure, logs): se
 [deploy/README.md](deploy/README.md).
 
 ```bash
-./deploy/launchd/install.sh crypto-spot
+./deploy/launchd/install.sh crypto-spot     # paper-trade crypto-spot
+./deploy/launchd/install-recorder.sh        # forward recorder (`quorum record`)
 ```
 
 ## Gates

@@ -632,3 +632,133 @@ mod tests {
         assert_eq!(seqs, vec![2, 3]);
     }
 }
+
+/// Serves fixed order books per symbol; unknown symbols are an error, like a venue would say.
+#[derive(Debug)]
+pub struct MemoryBookFeed {
+    venue: VenueId,
+    books: BTreeMap<String, crate::recorder::BookSnapshot>,
+}
+
+impl MemoryBookFeed {
+    pub const fn new(venue: VenueId) -> Self {
+        Self {
+            venue,
+            books: BTreeMap::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_book(mut self, symbol: &str, book: crate::recorder::BookSnapshot) -> Self {
+        self.books.insert(symbol.to_owned(), book);
+        self
+    }
+}
+
+#[async_trait]
+impl crate::recorder::BookFeed for MemoryBookFeed {
+    fn venue(&self) -> &VenueId {
+        &self.venue
+    }
+
+    async fn book(&self, symbol: &str) -> Result<crate::recorder::BookSnapshot, PortError> {
+        self.books
+            .get(symbol)
+            .cloned()
+            .ok_or_else(|| PortError::Unsupported(symbol.to_owned()))
+    }
+}
+
+/// Serves fixed derivatives snapshots, restamped with the caller's `now`.
+#[derive(Debug)]
+pub struct MemoryDerivsFeed {
+    venue: VenueId,
+    snapshots: Vec<crate::recorder::DerivsSnapshot>,
+}
+
+impl MemoryDerivsFeed {
+    pub const fn new(venue: VenueId, snapshots: Vec<crate::recorder::DerivsSnapshot>) -> Self {
+        Self { venue, snapshots }
+    }
+}
+
+#[async_trait]
+impl crate::recorder::DerivsFeed for MemoryDerivsFeed {
+    fn venue(&self) -> &VenueId {
+        &self.venue
+    }
+
+    async fn snapshot(
+        &self,
+        symbols: &[String],
+        now: DateTime<Utc>,
+    ) -> Result<Vec<crate::recorder::DerivsSnapshot>, PortError> {
+        Ok(self
+            .snapshots
+            .iter()
+            .filter(|s| symbols.contains(&s.symbol))
+            .map(|s| crate::recorder::DerivsSnapshot {
+                known_time: now,
+                ..s.clone()
+            })
+            .collect())
+    }
+}
+
+/// Yields fixed liquidation events, then ends (or stays silent with `keep_open`).
+#[derive(Debug, Clone)]
+pub struct MemoryLiquidationFeed {
+    venue: VenueId,
+    events: Vec<crate::recorder::LiquidationEvent>,
+    keep_open: bool,
+}
+
+impl MemoryLiquidationFeed {
+    pub const fn new(venue: VenueId, events: Vec<crate::recorder::LiquidationEvent>) -> Self {
+        Self {
+            venue,
+            events,
+            keep_open: false,
+        }
+    }
+
+    /// After the events, stay pending instead of ending the stream.
+    #[must_use]
+    pub const fn keep_open(mut self) -> Self {
+        self.keep_open = true;
+        self
+    }
+}
+
+struct EventQueue {
+    items: VecDeque<crate::recorder::LiquidationEvent>,
+    keep_open: bool,
+}
+
+impl Stream for EventQueue {
+    type Item = crate::recorder::LiquidationEvent;
+
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.items.pop_front() {
+            Some(item) => Poll::Ready(Some(item)),
+            None if self.keep_open => Poll::Pending,
+            None => Poll::Ready(None),
+        }
+    }
+}
+
+#[async_trait]
+impl crate::recorder::LiquidationFeed for MemoryLiquidationFeed {
+    fn venue(&self) -> &VenueId {
+        &self.venue
+    }
+
+    async fn subscribe(
+        &self,
+    ) -> Result<BoxStream<'static, crate::recorder::LiquidationEvent>, PortError> {
+        Ok(Box::pin(EventQueue {
+            items: self.events.iter().cloned().collect(),
+            keep_open: self.keep_open,
+        }))
+    }
+}

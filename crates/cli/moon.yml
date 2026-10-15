@@ -12,6 +12,7 @@ dependsOn:
   - 'data'
   - 'envelope'
   - 'journal'
+  - 'recorder'
   - 'runner'
   - 'slots'
 tasks:

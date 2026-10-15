@@ -7,9 +7,10 @@ Implements the `core` ports; nothing outside this crate knows about Binance or P
 
 | File | What it holds |
 |---|---|
-| `binance.rs` | `BinanceSpot`: async `MarketData` adapter for Binance spot klines (public REST, no key). Pages 1000 bars/request, drops still-forming bars, `end` exclusive, 200 ms between pages |
+| `binance.rs` | `BinanceSpot`: async `MarketData` adapter for Binance spot klines (public REST, no key). Pages 1000 bars/request, drops still-forming bars, `end` exclusive, 200 ms between pages; `BookFeed` (`/api/v3/depth`, 1000 levels) |
 | `binance_archive.rs` | R-1: Binance public data archive (data.binance.vision) — paged S3 listing of every spot symbol ever listed, monthly kline zips (CSV, ms or µs times) for delisted coins |
-| `binance_futures.rs` | E-2: `BinanceFutures`, public keyless USDT-perpetual funding-rate history (`/fapi/v1/fundingRate`), paged |
+| `binance_futures.rs` | E-2: `BinanceFutures`, public keyless USDT-perpetual funding-rate history (`/fapi/v1/fundingRate`), paged; `DerivsFeed` (premium index for every perpetual, open interest per symbol) |
+| `binance_liquidations.rs` | `BinanceLiquidations`: `LiquidationFeed` over the futures websocket `/market/ws/!forceOrder@arr` (the legacy `/ws` path connects but stays silent since Binance’s 2026-04-23 migration); reports every connect and disconnect; reconnects with backoff |
 | `binance_announcements.rs` | RB-4: Binance's public delisting announcements (CMS catalog 161), titles parsed to tickers only |
 | `tiingo.rs` | `TiingoDaily`: US equities end-of-day bars (TS-3, ADR 0008), `tiingo:TICKER:equity`, daily only, split/dividend-adjusted, a day returned only once it is over; key (`trader secrets set tiingo`) only in the `Authorization` header, never in `Debug` or logs |
 | `quality.rs` | RB-6: data-quality checks — missing bars, impossible candles, non-positive prices, outlier moves, dead feeds |

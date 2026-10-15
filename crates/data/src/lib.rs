@@ -12,6 +12,7 @@ pub mod binance;
 pub mod binance_announcements;
 pub mod binance_archive;
 pub mod binance_futures;
+pub mod binance_liquidations;
 pub mod binance_testnet;
 pub mod binance_ws;
 mod error;
