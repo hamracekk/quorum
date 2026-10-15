@@ -1646,6 +1646,7 @@ dependencies = [
  "quorum-recorder",
  "quorum-runner",
  "quorum-slots",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

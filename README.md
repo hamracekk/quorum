@@ -52,6 +52,7 @@ cargo run --release -p quorum-cli -- factors --slot crypto-spot --horizon 7     
 cargo run --release -p quorum-cli -- secrets set tiingo                            # once: Tiingo key → keychain
 cargo run --release -p quorum-cli -- research sync --slot multi-asset --days 7500  # 25 cross-asset ETFs
 cargo run --release -p quorum-cli -- factors --slot multi-asset --horizon 5
+cargo run --release -p quorum-cli -- regime --slot multi-asset                     # regime now + study → data/reports/
 ```
 
 Research slots span markets: `crypto-spot` (25 coins, Binance) and `multi-asset` (25 US ETFs

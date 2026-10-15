@@ -11,6 +11,7 @@ pub mod factors;
 pub mod overfit;
 mod parallel;
 pub mod portfolio;
+pub mod regime;
 pub mod robustness;
 pub mod scoreboard;
 pub mod signals;

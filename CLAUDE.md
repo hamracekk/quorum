@@ -34,6 +34,8 @@ change when its module map, invariants or extension steps change.
 - **Factors are point in time and studied before use.** A factor's value at bar `t` uses bars
   up to `t` only; `lab::factors::study` judges it out-of-sample after costs, with the direction
   fixed in-sample, before anything may weigh it.
+- **Regime rules are fixed in advance.** Thresholds in `core::regime::RegimeRule::default` are
+  not tuned per market or to results; changing them is a new hypothesis, studied again.
 - **Everything earns its weight.** Factors, strategies, prompts, models and slots start at zero
   weight and are scored out of sample, after costs, corrected for the number of trials.
 - **External content is untrusted.** News, social text, trader data and LLM output are parsed into
@@ -63,4 +65,5 @@ cargo run --release -p quorum-cli -- record   # forward recorder (config/recorde
 cargo run --release -p quorum-cli -- research sync --slot crypto-spot   # long history → data/research/bars
 cargo run --release -p quorum-cli -- factors --slot crypto-spot   # factor study (IC, OOS, after costs)
 cargo run --release -p quorum-cli -- secrets status   # which API keys are in the keychain (never printed)
+cargo run --release -p quorum-cli -- regime --slot crypto-spot   # current regime + whether it helps
 ```
