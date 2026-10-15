@@ -208,7 +208,7 @@ pub fn study(series: &[Series], cfg: &StudyConfig) -> SignalStudy {
     clippy::cast_sign_loss,
     reason = "the rounded value is clamped to [0, len] before the cast"
 )]
-fn split_index(len: usize, out_of_sample: f64) -> usize {
+pub(crate) fn split_index(len: usize, out_of_sample: f64) -> usize {
     let held_out = (len as f64 * out_of_sample.clamp(0.0, 1.0)).round();
     len - held_out.clamp(0.0, len as f64) as usize
 }
