@@ -70,6 +70,45 @@ pub async fn sync(
     Ok(SyncOutcome { added, total })
 }
 
+/// Extend the stored bars for `instrument`/`interval` back to `since`.
+///
+/// Downloads only bars older than the first stored one and prepends them. With nothing stored,
+/// does nothing (`sync` fills an empty store). Never changes the bars already stored.
+pub async fn backfill(
+    source: &dyn MarketData,
+    store: &dyn BarStore,
+    instrument: &InstrumentId,
+    interval: &str,
+    since: DateTime<Utc>,
+) -> std::result::Result<SyncOutcome, PortError> {
+    let Some(stored) = store.load(instrument, interval)? else {
+        return Ok(SyncOutcome { added: 0, total: 0 });
+    };
+    let Some(first) = stored.bars.first().map(|b| b.ts) else {
+        return Ok(SyncOutcome { added: 0, total: 0 });
+    };
+    if since >= first {
+        return Ok(SyncOutcome {
+            added: 0,
+            total: stored.bars.len(),
+        });
+    }
+    let mut bars: Vec<_> = source
+        .bars(instrument, interval, since, first)
+        .await?
+        .into_iter()
+        .filter(|b| b.ts < first)
+        .collect();
+    let added = bars.len();
+    bars.extend(stored.bars);
+    let total = bars.len();
+    if added > 0 {
+        store.save(&Series::new(instrument.clone(), bars), interval)?;
+    }
+    tracing::info!(%instrument, interval, added, total, "backfilled bars");
+    Ok(SyncOutcome { added, total })
+}
+
 #[cfg(test)]
 mod tests {
     use quorum_core::fakes::{MemoryBarStore, MemoryMarketData};
@@ -101,6 +140,50 @@ mod tests {
     fn source(hours: std::ops::Range<i64>) -> MemoryMarketData {
         MemoryMarketData::new(VenueId::new("test").expect("valid venue"))
             .with_bars(instrument(), bars(hours))
+    }
+
+    #[tokio::test]
+    async fn backfill_prepends_only_older_bars_and_keeps_the_stored_ones() {
+        let store = MemoryBarStore::default();
+        sync(&source(5..10), &store, &instrument(), "1h", at(5), at(100))
+            .await
+            .expect("first sync");
+        let outcome = backfill(&source(0..10), &store, &instrument(), "1h", at(2))
+            .await
+            .expect("backfill");
+        assert_eq!(outcome, SyncOutcome { added: 3, total: 8 });
+        let stored = store
+            .load(&instrument(), "1h")
+            .expect("load")
+            .expect("series");
+        let hours: Vec<i64> = stored
+            .bars
+            .iter()
+            .map(|b| b.ts.timestamp() / 3_600)
+            .collect();
+        assert_eq!(hours, (2..10).collect::<Vec<_>>(), "sorted, no duplicates");
+    }
+
+    #[tokio::test]
+    async fn backfill_already_covered_or_empty_is_a_no_op() {
+        let store = MemoryBarStore::default();
+        let empty = backfill(&source(0..10), &store, &instrument(), "1h", at(0))
+            .await
+            .expect("empty store");
+        assert_eq!(empty, SyncOutcome { added: 0, total: 0 });
+        sync(&source(0..10), &store, &instrument(), "1h", at(0), at(100))
+            .await
+            .expect("sync");
+        let covered = backfill(&source(0..10), &store, &instrument(), "1h", at(0))
+            .await
+            .expect("covered");
+        assert_eq!(
+            covered,
+            SyncOutcome {
+                added: 0,
+                total: 10
+            }
+        );
     }
 
     #[tokio::test]
