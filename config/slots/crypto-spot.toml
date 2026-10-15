@@ -1,0 +1,25 @@
+# Crypto spot slot (DESIGN §5.2): daily trend-momentum on the point-in-time top 25 coins by
+# dollar volume, ported from trader's daily-trend profile (walk-forward 2019–2026, see trader
+# PLAN §9 E-1 and ADR 0007). Binance supplies data and paper fills (envelope: paper only).
+
+id = "crypto-spot"
+venue = "binance"
+interval = "1d"
+strategies = ["trend-momentum"]
+calendar = "always-open"
+
+# Starts in paper: trader's walk-forward record is the research evidence. Live modes are
+# reached only through the ladder, and only as far as config/envelope.toml allows.
+start_mode = "paper"
+
+[universe]
+kind = "top-volume"
+size = 25
+window = 60        # days of dollar volume behind the ranking
+refresh = 30       # re-rank monthly
+min_history = 365  # skip new listings until a year of bars
+
+[costs]
+fee_rate = 0.001   # Binance VIP 0 spot
+slippage_bps = 2.0
+impact = 0.05      # square-root law, conservative (trader E-3)

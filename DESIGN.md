@@ -488,7 +488,7 @@ Each phase ends with a measurable exit criterion, not a feature list.
 
 | Phase | Build | Exit criterion |
 |---|---|---|
-| **P0 Foundation** | Repo, copy core/bus/journal/lab/risk from trader with history, envelope (paper only), slot model, NATS, Postgres, launchd services | trader's golden backtest reproduces bit for bit; crypto-spot slot paper-trades on the laptop and resumes cleanly after sleep |
+| **P0 Foundation** 🔄 | Repo, copy core/bus/journal/lab/risk from trader with history, envelope (paper only), slot model, NATS, Postgres, launchd services | trader's golden backtest reproduces bit for bit; crypto-spot slot paper-trades on the laptop and resumes cleanly after sleep |
 | **P1 Recorder + factors** | Forward recorder, PIT store, first factor families (price, structure, macro), regime model | 2 weeks of clean recorded data; each factor has an event-study report |
 | **P2 Second market** | `equities` slot on IBKR paper (UCITS ETFs, stocks), trading calendars, equity data | Equity slot runs paper 4 weeks alongside crypto |
 | **P3 Allocator + risk process** | Cross-slot allocator, separate risk process, brakes, stress tests | Combined walk-forward beats each slot alone on Sharpe and drawdown |

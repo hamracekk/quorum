@@ -25,10 +25,19 @@ evidence; a separate **risk process** enforces the **envelope** the operator set
 | `ml` | Gradient-boosted trees as cross-sectional learners | trader |
 | `hyperliquid` | Followed traders, read only | trader |
 | `predictions` | Prediction markets (Kalshi), read only | trader |
+| `envelope` | The operator envelope: capital, loss limits, venues, highest mode per slot; read-only to the system | new |
+| `slots` | Slot config (venue, universe, strategies, costs) and the autonomy ladder | new |
 
 trader's `service`, `mcp`, `agents`, `server`, `cli`, `app` and dashboard were **not** copied:
 they are built around one paper session and are rebuilt here around slots, the evaluator and the
 allocator (DESIGN §16).
+
+## Config
+
+| File | What it is |
+|---|---|
+| `config/envelope.toml` | The operator envelope. Paper only today |
+| `config/slots/crypto-spot.toml` | Crypto spot slot: daily trend-momentum, top 25 by volume, Binance |
 
 ## Gates
 
