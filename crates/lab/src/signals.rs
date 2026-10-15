@@ -13,10 +13,10 @@
 
 use std::collections::BTreeMap;
 
+use quorum_core::Series;
+use quorum_core::patterns::Bias;
+use quorum_core::signals::{Signal, SignalConfig, occurrences};
 use serde::Serialize;
-use trader_core::Series;
-use trader_core::patterns::Bias;
-use trader_core::signals::{Signal, SignalConfig, occurrences};
 
 #[derive(Debug, Clone)]
 pub struct StudyConfig {
@@ -279,7 +279,7 @@ fn verdict(
 #[cfg(test)]
 mod tests {
     use chrono::DateTime;
-    use trader_core::{Bar, InstrumentId};
+    use quorum_core::{Bar, InstrumentId};
 
     use super::*;
 
@@ -363,7 +363,7 @@ mod tests {
             verdict(bull, &[h(100, 0.05, 9.0)], &[h(10, 0.05, 9.0)], 24),
             Verdict::TooFew
         );
-        let doji = Signal::Pattern(trader_core::patterns::Pattern::Doji);
+        let doji = Signal::Pattern(quorum_core::patterns::Pattern::Doji);
         assert_eq!(verdict(doji, &[], &[], 24), Verdict::Neutral);
     }
 

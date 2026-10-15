@@ -5,7 +5,7 @@ language: 'rust'
 stack: 'backend'
 tags: ['rust']
 project:
-  name: 'trader-data'
+  name: 'quorum-data'
   description: 'Market data download (Binance), Parquet storage, incremental sync'
 dependsOn:
   - 'core'

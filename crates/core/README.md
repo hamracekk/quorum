@@ -1,4 +1,4 @@
-# trader-core (`core`)
+# quorum-core (`core`)
 
 The domain heart of trader: types, the strategy interface, the port traits every external
 boundary goes through, a simulated broker, risk limits, metrics and the backtest engine.
@@ -77,7 +77,7 @@ depends on no internal crate.
 ## Testing
 
 ```bash
-moon run core:test        # or: cargo test -p trader-core
+moon run core:test        # or: cargo test -p quorum-core
 ```
 
 Floats are compared with a tolerance, never `==`. Test helpers build synthetic bars and

@@ -21,9 +21,9 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Datelike, Duration, Utc};
+use quorum_core::derivatives::FundingPoint;
+use quorum_core::{Bar, EquityPoint, InstrumentId, Report};
 use serde::Serialize;
-use trader_core::derivatives::FundingPoint;
-use trader_core::{Bar, EquityPoint, InstrumentId, Report};
 
 /// Funding periods per year on 8-hour funding.
 const PERIODS_PER_YEAR: f64 = 3.0 * 365.0;

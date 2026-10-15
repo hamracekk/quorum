@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use trader_bus::{Bus, JsonlEventLog, replay};
-use trader_core::strategies::{PerInstrument, SmaCross};
-use trader_core::{
+use quorum_bus::{Bus, JsonlEventLog, replay};
+use quorum_core::strategies::{PerInstrument, SmaCross};
+use quorum_core::{
     BacktestConfig, Bar, Event, EventLog, InstrumentId, Series, Strategy, run_with_events,
 };
 
@@ -16,7 +16,7 @@ const fn at(hours: i64) -> DateTime<Utc> {
 }
 
 fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("trader-replay-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("quorum-replay-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir); // stale leftovers from an earlier run, if any
     dir
 }

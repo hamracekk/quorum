@@ -5,7 +5,7 @@ language: 'rust'
 stack: 'backend'
 tags: ['rust']
 project:
-  name: 'trader-news'
+  name: 'quorum-news'
   description: 'News ingestion: RSS/Atom feeds (incl. SEC EDGAR), sanitized into plain-text items'
 dependsOn:
   - 'core'

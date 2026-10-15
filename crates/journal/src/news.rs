@@ -2,13 +2,13 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
-use sqlx::Row;
-use sqlx::sqlite::SqliteRow;
-use trader_core::news::{
+use quorum_core::news::{
     DUPLICATE_WINDOW_HOURS, Extraction, ExtractionStatus, NewsItem, NewsQuery, NewsSourceStats,
     StoredNews, TokenUsage, title_key,
 };
-use trader_core::{NewsStore, PortError};
+use quorum_core::{NewsStore, PortError};
+use sqlx::Row;
+use sqlx::sqlite::SqliteRow;
 
 use crate::agents::{from_json, fts_query, limit, to_json};
 use crate::{JournalError, SqliteJournal, format_ts, parse_ts, port};

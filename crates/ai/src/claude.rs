@@ -13,12 +13,12 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use quorum_core::PortError;
+use quorum_core::chat::{ChatBlock, ChatReply, ChatRequest, ChatRole, StopReason};
+use quorum_core::ports::{ChatModel, LlmProvider, LlmRequest, LlmResponse};
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use trader_core::PortError;
-use trader_core::chat::{ChatBlock, ChatReply, ChatRequest, ChatRole, StopReason};
-use trader_core::ports::{ChatModel, LlmProvider, LlmRequest, LlmResponse};
 
 pub const DEFAULT_URL: &str = "https://api.anthropic.com";
 const VERSION: &str = "2023-06-01";

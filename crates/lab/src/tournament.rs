@@ -12,8 +12,8 @@
 //! real after every contender ever tried — to reach `min_deflated`; a few weeks of luck from one
 //! of many challengers is not enough.
 
+use quorum_core::Report;
 use serde::Serialize;
-use trader_core::Report;
 
 use crate::overfit::deflated_sharpe_trials;
 

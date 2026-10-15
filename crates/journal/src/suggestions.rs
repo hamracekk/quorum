@@ -3,10 +3,10 @@
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
+use quorum_core::InstrumentId;
+use quorum_core::suggestions::{NewSuggestion, Side, Status, Suggestion};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
-use trader_core::InstrumentId;
-use trader_core::suggestions::{NewSuggestion, Side, Status, Suggestion};
 
 use crate::{JournalError, SqliteJournal, format_ts, parse_ts};
 

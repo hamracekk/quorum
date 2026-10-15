@@ -9,11 +9,11 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
+use quorum_core::impact::{ImpactMap, ThemeMove};
+use quorum_core::news::{EventType, Magnitude, NewsEvent, NewsItem};
+use quorum_core::ports::LlmRequest;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use trader_core::impact::{ImpactMap, ThemeMove};
-use trader_core::news::{EventType, Magnitude, NewsEvent, NewsItem};
-use trader_core::ports::LlmRequest;
 
 use crate::extract::{MAX_RATIONALE, Reading, inert};
 

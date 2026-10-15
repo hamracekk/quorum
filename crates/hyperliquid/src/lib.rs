@@ -9,13 +9,13 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use quorum_core::traders::{
+    LeaderboardEntry, TraderAccount, TraderFill, TraderPosition, WindowStats,
+};
+use quorum_core::{PortError, TraderSource};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use trader_core::traders::{
-    LeaderboardEntry, TraderAccount, TraderFill, TraderPosition, WindowStats,
-};
-use trader_core::{PortError, TraderSource};
 
 /// Public info endpoint.
 pub const HYPERLIQUID_INFO: &str = "https://api.hyperliquid.xyz/info";
@@ -31,7 +31,7 @@ const MAX_PAGES: usize = 10;
 const TIMEOUT: Duration = Duration::from_secs(20);
 /// Tries per request when rate-limited (waits 2 s, then 4 s).
 const ATTEMPTS: u32 = 3;
-const AGENT: &str = concat!("trader/", env!("CARGO_PKG_VERSION"), " (local research)");
+const AGENT: &str = concat!("quorum/", env!("CARGO_PKG_VERSION"), " (local research)");
 
 #[derive(Debug, thiserror::Error)]
 pub enum HyperliquidError {

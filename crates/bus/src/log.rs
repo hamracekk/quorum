@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use chrono::{DateTime, NaiveDate, Utc};
-use trader_core::{Envelope, Event, EventLog, PortError};
+use quorum_core::{Envelope, Event, EventLog, PortError};
 
 use crate::BusError;
 
@@ -152,7 +152,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("trader-log-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("quorum-log-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir); // stale leftovers from an earlier run, if any
         dir
     }

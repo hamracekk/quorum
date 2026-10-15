@@ -5,7 +5,7 @@ language: 'rust'
 stack: 'backend'
 tags: ['rust']
 project:
-  name: 'trader-hyperliquid'
+  name: 'quorum-hyperliquid'
   description: 'Followed traders, read only: Hyperliquid public positions and fills'
 dependsOn:
   - 'core'

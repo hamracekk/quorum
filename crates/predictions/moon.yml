@@ -5,7 +5,7 @@ language: 'rust'
 stack: 'backend'
 tags: ['rust']
 project:
-  name: 'trader-predictions'
+  name: 'quorum-predictions'
   description: 'Prediction markets, read only: Kalshi market state and probability history'
 dependsOn:
   - 'core'

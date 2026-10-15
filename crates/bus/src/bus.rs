@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use quorum_core::{Envelope, Event, EventLog, PortError};
 use tokio::sync::broadcast;
-use trader_core::{Envelope, Event, EventLog, PortError};
 
 /// In-process event bus: every event is appended to the event log **first**, then broadcast
 /// to subscribers, so a subscriber never sees an event the log doesn't have.
@@ -43,7 +43,7 @@ impl Bus {
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, Utc};
-    use trader_core::fakes::MemoryEventLog;
+    use quorum_core::fakes::MemoryEventLog;
 
     use super::*;
 

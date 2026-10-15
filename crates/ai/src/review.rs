@@ -8,9 +8,9 @@
 //! inside `<facts>` tags, with the same instructions as news. The answer is a closed schema with
 //! bounded lists and lengths; anything else is rejected whole.
 
+use quorum_core::ports::LlmRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use trader_core::ports::LlmRequest;
 
 use crate::extract::inert;
 

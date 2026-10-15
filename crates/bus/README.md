@@ -1,4 +1,4 @@
-# trader-bus (`bus`)
+# quorum-bus (`bus`)
 
 Event plumbing (ADR 0002): the append-only **event log**, the in-process **bus**, and
 deterministic **replay** of recorded market data through the trading engine.
@@ -42,5 +42,5 @@ deterministic **replay** of recorded market data through the trading engine.
 ## Testing
 
 ```bash
-moon run bus:test         # or: cargo test -p trader-bus
+moon run bus:test         # or: cargo test -p quorum-bus
 ```

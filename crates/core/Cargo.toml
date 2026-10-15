@@ -1,5 +1,5 @@
 [package]
-name = "trader-core"
+name = "quorum-core"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

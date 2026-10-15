@@ -1,4 +1,4 @@
-use trader_core::Performance;
+use quorum_core::Performance;
 
 use super::*;
 

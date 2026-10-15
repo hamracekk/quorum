@@ -1,4 +1,4 @@
-# trader-lab (`lab`)
+# quorum-lab (`lab`)
 
 Research tooling on top of the backtester: parameter sweeps (in-sample) and walk-forward
 evaluation (out-of-sample). Later milestones add the strategy tournament and self-improvement
@@ -47,7 +47,7 @@ evaluated; a partial tail is skipped.
 ## Testing
 
 ```bash
-moon run lab:test         # or: cargo test -p trader-lab
+moon run lab:test         # or: cargo test -p quorum-lab
 ```
 
 `walk_forward::tests::trending_series` is a deterministic synthetic price series shared by the

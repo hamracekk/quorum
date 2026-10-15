@@ -1,4 +1,4 @@
-# trader-predictions
+# quorum-predictions
 
 Prediction markets, read only (SRC-2): Kalshi behind the `PredictionSource` port.
 
@@ -13,8 +13,8 @@ Prediction markets, read only (SRC-2): Kalshi behind the `PredictionSource` port
 - **Polymarket is not implemented:** it is blocked on the operator's connection (Czech DNS block of
   unlicensed gambling) and trader does not work around such blocks (ADR 0004).
 
-Turning probabilities into calls is `trader_core::predictions::moves`; scoring them is the
-scoreboard's job (`trader-service::predictions`).
+Turning probabilities into calls is `quorum_core::predictions::moves`; scoring them is the
+scoreboard's job (the service layer, rebuilt in quorum).
 
 | File | What |
 |---|---|

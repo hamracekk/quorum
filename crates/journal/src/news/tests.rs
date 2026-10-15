@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
-use trader_core::InstrumentId;
-use trader_core::news::{Direction, EventType, Horizon, Magnitude, NewsEvent};
+use quorum_core::InstrumentId;
+use quorum_core::news::{Direction, EventType, Horizon, Magnitude, NewsEvent};
 
 use super::*;
 

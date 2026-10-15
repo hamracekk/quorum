@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use quorum_core::news::NewsItem;
+use quorum_core::{NewsSource, PortError};
 use reqwest::Url;
-use trader_core::news::NewsItem;
-use trader_core::{NewsSource, PortError};
 
 use crate::sanitize::{canonical_url, plain_text};
 
@@ -28,7 +28,7 @@ pub const MAX_ENTRIES: usize = 200;
 pub const MAX_BYTES: usize = 5 * 1024 * 1024;
 
 const TIMEOUT: Duration = Duration::from_secs(20);
-const DEFAULT_AGENT: &str = concat!("trader/", env!("CARGO_PKG_VERSION"), " (local research)");
+const DEFAULT_AGENT: &str = concat!("quorum/", env!("CARGO_PKG_VERSION"), " (local research)");
 
 #[derive(Debug, thiserror::Error)]
 pub enum NewsError {

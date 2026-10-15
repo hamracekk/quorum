@@ -15,11 +15,11 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
+use quorum_core::InstrumentId;
+use quorum_core::news::{Direction, EventType, Horizon, Magnitude, NewsEvent, NewsItem};
+use quorum_core::ports::LlmRequest;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use trader_core::InstrumentId;
-use trader_core::news::{Direction, EventType, Horizon, Magnitude, NewsEvent, NewsItem};
-use trader_core::ports::LlmRequest;
 
 /// Bump when the prompt or schema changes: items are then read again.
 pub const PROMPT_VERSION: &str = "news-v1";

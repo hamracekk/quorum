@@ -6,7 +6,7 @@
 //! returns are heavy-tailed, and one outlier week should not shape the trees. Deterministic:
 //! ties go to the lower feature and threshold.
 
-use trader_core::strategies::{FEATURES, Learner, Row, VolTarget, XsLearner};
+use quorum_core::strategies::{FEATURES, Learner, Row, VolTarget, XsLearner};
 
 /// Boosting settings.
 #[derive(Debug, Clone, Copy, PartialEq)]

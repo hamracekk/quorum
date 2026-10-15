@@ -1,4 +1,4 @@
-# trader-data (`data`)
+# quorum-data (`data`)
 
 Adapters for market data and bar storage, plus the incremental sync that connects them.
 Implements the `core` ports; nothing outside this crate knows about Binance or Parquet.
@@ -49,8 +49,8 @@ Implements the `core` ports; nothing outside this crate knows about Binance or P
 ## Testing
 
 ```bash
-moon run data:test        # or: cargo test -p trader-data
+moon run data:test        # or: cargo test -p quorum-data
 ```
 
 No test touches the real network: Binance tests use a local `wiremock` server, sync tests use
-`trader_core::fakes`, store tests use per-test temp directories.
+`quorum_core::fakes`, store tests use per-test temp directories.

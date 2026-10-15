@@ -5,7 +5,7 @@ language: 'rust'
 stack: 'backend'
 tags: ['rust']
 project:
-  name: 'trader-journal'
+  name: 'quorum-journal'
   description: 'SQLite journal of runs, signals, targets, fills (sqlx, WAL, migrations)'
 dependsOn:
   - 'core'

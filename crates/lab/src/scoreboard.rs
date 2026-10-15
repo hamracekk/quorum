@@ -26,10 +26,10 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, Utc};
+use quorum_core::patterns::Bias;
+use quorum_core::signals::{Signal, SignalConfig, occurrences};
+use quorum_core::{Bar, InstrumentId, Series};
 use serde::Serialize;
-use trader_core::patterns::Bias;
-use trader_core::signals::{Signal, SignalConfig, occurrences};
-use trader_core::{Bar, InstrumentId, Series};
 
 /// Id of the always-long baseline, the market's drift every excess is measured against.
 pub const ALWAYS_LONG: &str = "always_long";

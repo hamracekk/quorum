@@ -1,7 +1,7 @@
-# trader-ai (`ai`)
+# quorum-ai (`ai`)
 
 Language models for trader (M5b): `LlmProvider` adapters and the news → typed-event extraction
-contract. Orchestration (tiers, budget, cache, storage) lives in `trader_service::extraction`.
+contract. Orchestration (tiers, budget, cache, storage) lives in the service layer (not copied; rebuilt in quorum).
 
 ## Module map
 
@@ -29,7 +29,7 @@ contract. Orchestration (tiers, budget, cache, storage) lives in `trader_service
 ## Testing
 
 ```bash
-moon run ai:test         # or: cargo test -p trader-ai
+moon run ai:test         # or: cargo test -p quorum-ai
 ```
 
 Claude requests are checked against a local mock server (headers, body shape, fallbacks on/off,

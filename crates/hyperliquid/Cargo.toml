@@ -1,5 +1,5 @@
 [package]
-name = "trader-hyperliquid"
+name = "quorum-hyperliquid"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -12,7 +12,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-trader-core.workspace = true
+quorum-core.workspace = true
 
 [dev-dependencies]
 wiremock.workspace = true

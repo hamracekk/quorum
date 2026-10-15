@@ -10,8 +10,8 @@
 use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
+use quorum_core::{EquityPoint, Report};
 use serde::Serialize;
-use trader_core::{EquityPoint, Report};
 
 /// How the streams share capital.
 #[derive(Debug, Clone, PartialEq, Serialize)]

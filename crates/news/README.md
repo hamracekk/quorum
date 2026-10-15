@@ -1,7 +1,7 @@
-# trader-news (`news`)
+# quorum-news (`news`)
 
 News ingestion (M5a): RSS 0.x/1.0/2.0, Atom and JSON Feed — crypto news sites and SEC EDGAR
-filing feeds — turned into sanitized `NewsItem`s behind the `NewsSource` port (`trader_core::ports`).
+filing feeds — turned into sanitized `NewsItem`s behind the `NewsSource` port (`quorum_core::ports`).
 The service tags items with configured instruments and stores them in the journal
 (`news_items`, migration 0006); M5b extracts typed events from them with an LLM.
 
@@ -28,5 +28,5 @@ The service tags items with configured instruments and stores them in the journa
 ## Testing
 
 ```bash
-moon run news:test         # or: cargo test -p trader-news
+moon run news:test         # or: cargo test -p quorum-news
 ```

@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, TimeDelta, Utc};
+use quorum_core::{Bar, InstrumentId, InstrumentKind, MarketData, PortError, VenueId};
 use serde::Deserialize;
-use trader_core::{Bar, InstrumentId, InstrumentKind, MarketData, PortError, VenueId};
 
 use crate::{DataError, Result};
 
@@ -62,7 +62,7 @@ impl TiingoDaily {
     /// Point at a different host, e.g. a local mock server.
     pub fn with_base_url(base_url: impl Into<String>, key: Option<String>) -> Result<Self> {
         let client = reqwest::Client::builder()
-            .user_agent("trader/0.1")
+            .user_agent("quorum/0.1")
             .timeout(Duration::from_secs(30))
             .build()?;
         let venue = VenueId::new(VENUE).map_err(|e| DataError::Malformed(e.to_string()))?;

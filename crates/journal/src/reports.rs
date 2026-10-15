@@ -1,9 +1,9 @@
 //! Reports to the operator (AG-3c, migration `0010_agent_reports.sql`).
 
 use chrono::{DateTime, Utc};
+use quorum_core::agents::{AgentReport, NewReport};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
-use trader_core::agents::{AgentReport, NewReport};
 
 use crate::{JournalError, SqliteJournal, format_ts, parse_ts};
 

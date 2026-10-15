@@ -9,14 +9,10 @@ publish = false
 
 [workspace.dependencies]
 anyhow = "1"
-axum = "0.8"
 async-trait = "0.1"
 arrow-array = "60"
 arrow-schema = "60"
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
-config = { version = "0.15", default-features = false, features = ["toml"] }
-csv = "1"
 futures-core = "0.3"
 # Signed exchange requests (T-7 testnet executor): HMAC-SHA256, hex.
 hex = "0.4"
@@ -26,44 +22,30 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.11"
 futures-util = "0.3"
 parquet = { version = "60", default-features = false, features = ["arrow", "snap"] }
-rmcp = { version = "3.5", features = ["server", "macros", "transport-io"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip: exact f64 parsing — replayed prices must be bit-identical to recorded ones.
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
 thiserror = "2"
-# Backup archives (gzip-compressed tar, pure Rust backend).
-tar = "0.4"
-# Desktop shell (M4): a native window around the local dashboard server.
-tauri = { version = "2.12", default-features = false, features = ["wry", "common-controls-v6", "x11", "tray-icon", "image-png"] }
-tauri-build = { version = "2.7", default-features = false }
 # News feeds: RSS 0.x/1.0/2.0, Atom and JSON Feed.
 feed-rs = "3"
-flate2 = "1"
 tokio-stream = "0.1"
 tokio-tungstenite = { version = "0.30", features = ["connect", "rustls-tls-webpki-roots"] }
-tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.7", features = ["fs", "trace"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1", features = ["v7"] }
 wiremock = "0.6"
-trader-bus = { path = "crates/bus" }
-trader-core = { path = "crates/core" }
-trader-data = { path = "crates/data" }
-trader-news = { path = "crates/news" }
-trader-predictions = { path = "crates/predictions" }
-trader-hyperliquid = { path = "crates/hyperliquid" }
-trader-agents = { path = "crates/agents" }
-trader-ai = { path = "crates/ai" }
-trader-journal = { path = "crates/journal" }
-trader-lab = { path = "crates/lab" }
-trader-ml = { path = "crates/ml" }
-trader-mcp = { path = "crates/mcp" }
-trader-server = { path = "crates/server" }
-trader-service = { path = "crates/service" }
+quorum-bus = { path = "crates/bus" }
+quorum-core = { path = "crates/core" }
+quorum-data = { path = "crates/data" }
+quorum-news = { path = "crates/news" }
+quorum-predictions = { path = "crates/predictions" }
+quorum-hyperliquid = { path = "crates/hyperliquid" }
+quorum-ai = { path = "crates/ai" }
+quorum-journal = { path = "crates/journal" }
+quorum-lab = { path = "crates/lab" }
+quorum-ml = { path = "crates/ml" }
 
 # Centralized lint policy — every crate opts in with `[lints] workspace = true`.
 # Levels are `warn` locally (so dev builds stay usable); `cargo lint` and CI pass

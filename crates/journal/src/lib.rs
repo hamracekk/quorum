@@ -21,13 +21,13 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
-use sqlx::Row;
-use sqlx::migrate::Migrator;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
-use trader_core::{
+use quorum_core::{
     AgentCall, Decision, Event, Fill, InstrumentId, Journal, Order, OrderId, OrderStatus,
     PortError, RunInfo, RunKind, Side,
 };
+use sqlx::Row;
+use sqlx::migrate::Migrator;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
@@ -473,7 +473,7 @@ mod tests {
         vec![
             Event::Bar {
                 instrument: btc(),
-                bar: trader_core::Bar {
+                bar: quorum_core::Bar {
                     ts: at(0),
                     open: 1.0,
                     high: 1.0,
@@ -611,9 +611,9 @@ mod tests {
     #[tokio::test]
     async fn backups_are_consistent_copies_that_pass_the_integrity_check() {
         let dir =
-            std::env::temp_dir().join(format!("trader-journal-backup-{}", std::process::id()));
+            std::env::temp_dir().join(format!("quorum-journal-backup-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let journal = SqliteJournal::open(&dir.join("trader.db"))
+        let journal = SqliteJournal::open(&dir.join("quorum.db"))
             .await
             .expect("journal");
         journal.start_run(&run("r1", 0)).await.expect("start");
@@ -700,9 +700,9 @@ mod tests {
 
     #[tokio::test]
     async fn file_journal_persists_across_reopen_in_wal_mode() {
-        let dir = std::env::temp_dir().join(format!("trader-journal-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("quorum-journal-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir); // stale leftovers from an earlier run, if any
-        let path = dir.join("trader.db");
+        let path = dir.join("quorum.db");
 
         let journal = SqliteJournal::open(&path).await.expect("open");
         journal.start_run(&run("r1", 0)).await.expect("start");

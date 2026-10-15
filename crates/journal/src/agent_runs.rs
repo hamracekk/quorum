@@ -1,9 +1,9 @@
 //! Runs of internal agents (AG-3b, migration `0009_agent_runs.sql`).
 
 use chrono::{DateTime, Utc};
+use quorum_core::agents::AgentRun;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
-use trader_core::agents::AgentRun;
 
 use crate::{JournalError, SqliteJournal, format_ts, parse_ts};
 

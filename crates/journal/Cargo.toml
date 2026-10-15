@@ -1,5 +1,5 @@
 [package]
-name = "trader-journal"
+name = "quorum-journal"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -12,7 +12,7 @@ serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-trader-core.workspace = true
+quorum-core.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

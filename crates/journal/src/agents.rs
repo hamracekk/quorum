@@ -2,15 +2,15 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use quorum_core::agents::{
+    AgentControl, AgentMessage, AgentReport, AgentRun, EVERYONE, Finding, FindingQuery,
+    FindingStatus, MessageQuery, NewFinding, NewMessage, NewReport, OPERATOR, Verdict,
+};
+use quorum_core::{AgentStore, PortError};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
-use trader_core::agents::{
-    AgentControl, AgentMessage, AgentReport, AgentRun, EVERYONE, Finding, FindingQuery,
-    FindingStatus, MessageQuery, NewFinding, NewMessage, NewReport, OPERATOR, Verdict,
-};
-use trader_core::{AgentStore, PortError};
 
 use crate::{JournalError, SqliteJournal, format_ts, parse_ts, port};
 
@@ -33,7 +33,7 @@ fn finding_from(row: &SqliteRow) -> Result<Finding, JournalError> {
         updated_at: parse_ts(&text("updated_at")?)?,
         kind: text("kind")?
             .parse()
-            .map_err(|e: trader_core::agents::AgentError| JournalError::Corrupt(e.0))?,
+            .map_err(|e: quorum_core::agents::AgentError| JournalError::Corrupt(e.0))?,
         instruments: from_json("instruments", &text("instruments")?)?,
         claim: text("claim")?,
         hypothesis: hypothesis
@@ -42,7 +42,7 @@ fn finding_from(row: &SqliteRow) -> Result<Finding, JournalError> {
         evidence: from_json("evidence", &text("evidence")?)?,
         status: text("status")?
             .parse()
-            .map_err(|e: trader_core::agents::AgentError| JournalError::Corrupt(e.0))?,
+            .map_err(|e: quorum_core::agents::AgentError| JournalError::Corrupt(e.0))?,
         supersedes: row.try_get("supersedes")?,
         superseded_by: row.try_get("superseded_by")?,
         confidence: row.try_get("confidence")?,
@@ -504,10 +504,10 @@ impl AgentStore for SqliteJournal {
     async fn post_suggestion(
         &self,
         author: &str,
-        suggestion: &trader_core::suggestions::NewSuggestion,
+        suggestion: &quorum_core::suggestions::NewSuggestion,
         price: Option<f64>,
         ts: DateTime<Utc>,
-    ) -> Result<trader_core::suggestions::Suggestion, PortError> {
+    ) -> Result<quorum_core::suggestions::Suggestion, PortError> {
         self.insert_suggestion(author, suggestion, price, ts)
             .await
             .map_err(agent_port)
@@ -516,15 +516,15 @@ impl AgentStore for SqliteJournal {
     async fn suggestion(
         &self,
         id: i64,
-    ) -> Result<Option<trader_core::suggestions::Suggestion>, PortError> {
+    ) -> Result<Option<quorum_core::suggestions::Suggestion>, PortError> {
         self.suggestion_by_id(id).await.map_err(agent_port)
     }
 
     async fn suggestions(
         &self,
-        status: Option<trader_core::suggestions::Status>,
+        status: Option<quorum_core::suggestions::Status>,
         limit: usize,
-    ) -> Result<Vec<trader_core::suggestions::Suggestion>, PortError> {
+    ) -> Result<Vec<quorum_core::suggestions::Suggestion>, PortError> {
         self.select_suggestions(status, limit)
             .await
             .map_err(agent_port)
@@ -533,7 +533,7 @@ impl AgentStore for SqliteJournal {
     async fn session_suggestions(
         &self,
         session: &str,
-    ) -> Result<Vec<trader_core::suggestions::Suggestion>, PortError> {
+    ) -> Result<Vec<quorum_core::suggestions::Suggestion>, PortError> {
         self.select_session_suggestions(session)
             .await
             .map_err(agent_port)
@@ -541,7 +541,7 @@ impl AgentStore for SqliteJournal {
 
     async fn update_suggestion(
         &self,
-        suggestion: &trader_core::suggestions::Suggestion,
+        suggestion: &quorum_core::suggestions::Suggestion,
     ) -> Result<(), PortError> {
         self.update_suggestion_row(suggestion)
             .await
@@ -551,11 +551,11 @@ impl AgentStore for SqliteJournal {
     async fn post_control(
         &self,
         author: &str,
-        instrument: &trader_core::InstrumentId,
-        action: trader_core::suggestions::ControlAction,
+        instrument: &quorum_core::InstrumentId,
+        action: quorum_core::suggestions::ControlAction,
         reason: &str,
         ts: DateTime<Utc>,
-    ) -> Result<trader_core::suggestions::PositionControl, PortError> {
+    ) -> Result<quorum_core::suggestions::PositionControl, PortError> {
         self.insert_control(author, instrument, action, reason, ts)
             .await
             .map_err(agent_port)
@@ -563,9 +563,9 @@ impl AgentStore for SqliteJournal {
 
     async fn position_controls(
         &self,
-        status: Option<trader_core::suggestions::ControlStatus>,
+        status: Option<quorum_core::suggestions::ControlStatus>,
         limit: usize,
-    ) -> Result<Vec<trader_core::suggestions::PositionControl>, PortError> {
+    ) -> Result<Vec<quorum_core::suggestions::PositionControl>, PortError> {
         self.select_controls_by(status, limit)
             .await
             .map_err(agent_port)
@@ -574,7 +574,7 @@ impl AgentStore for SqliteJournal {
     async fn session_controls(
         &self,
         session: &str,
-    ) -> Result<Vec<trader_core::suggestions::PositionControl>, PortError> {
+    ) -> Result<Vec<quorum_core::suggestions::PositionControl>, PortError> {
         self.select_session_controls(session)
             .await
             .map_err(agent_port)
@@ -582,7 +582,7 @@ impl AgentStore for SqliteJournal {
 
     async fn update_control(
         &self,
-        control: &trader_core::suggestions::PositionControl,
+        control: &quorum_core::suggestions::PositionControl,
     ) -> Result<(), PortError> {
         self.update_control_row(control).await.map_err(agent_port)
     }
