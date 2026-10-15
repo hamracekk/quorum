@@ -7,6 +7,7 @@
 
 pub mod carry;
 mod error;
+pub mod factors;
 pub mod overfit;
 mod parallel;
 pub mod portfolio;

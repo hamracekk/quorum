@@ -11,6 +11,7 @@ pub mod chat;
 pub mod derivatives;
 pub mod engine;
 pub mod events;
+pub mod factors;
 pub mod fakes;
 pub mod impact;
 pub mod indicators;

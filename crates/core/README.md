@@ -13,6 +13,7 @@ depends on no internal crate.
 | `types.rs` | `Bar` (keyed by **open** time), `Series` (one instrument's bars), `Fill`, `Side`, `EquityPoint` |
 | `events.rs` | `Event` (bar, signal, target, fill, risk_halt; tagged JSON) and `Envelope` (with log `seq`) |
 | `engine.rs` | `Engine`: event-driven core — bars in (time order), decision events out; used by backtest, replay and live; per-trade stops (T-2) and operator-approved `manual_trade`s (T-3) |
+| `factors.rs` | Factor contract (`FactorId` name@version, `PriceFactor`: value at bar `t` from bars up to `t`), the price & trend family (`price_family`: reversal 5, momentum 20/60/120, trend strength 60, realised vol 30, stretch 20, volume surprise 30), `ranks` / `rank_scores` |
 | `recorder.rs` | Forward-recorder records (`Record`: liquidation, book summary, derivs snapshot, marker), feeds (`BookFeed`, `DerivsFeed`, `LiquidationFeed`), `summarize_book` (spread, depth bands, imbalance; unknown beyond the snapshot) |
 | `ports.rs` | Port traits `MarketData`, `MarketStream` (async), `BarStore`, `EventLog`, `Journal`, `AgentStore`, `NewsSource`, `NewsStore`, `LlmProvider`, `Notifier` (async), `RunInfo`/`RunKind`, `PortError` |
 | `fakes.rs` | In-memory `MemoryMarketData`, `MemoryMarketStream`, `MemoryBarStore`, `MemoryEventLog`, `MemoryNewsSource`, `MemoryLlm`, `MemoryNotifier` for tests in any crate |
