@@ -59,6 +59,15 @@ enum Command {
         #[arg(long, default_value_t = 7)]
         horizon: usize,
     },
+    /// Label a slot's market (trending, choppy, risk-off, crisis) and study whether the label
+    /// separates risk and pays, in-sample vs out-of-sample. Report to `<data>/reports/`.
+    Regime {
+        #[arg(long)]
+        slot: String,
+        /// Bars ahead the forward volatility and return are measured over.
+        #[arg(long, default_value_t = 20)]
+        horizon: usize,
+    },
     /// Research data, kept apart from what paper sessions replay.
     Research {
         #[command(subcommand)]
@@ -163,6 +172,9 @@ async fn main() -> Result<ExitCode> {
                 }
             }
             Ok(ExitCode::SUCCESS)
+        }
+        Command::Regime { slot, horizon } => {
+            regime(&cli.config, &cli.data, &slot, horizon).map(|()| ExitCode::SUCCESS)
         }
         Command::Factors { slot, horizon } => {
             factors(&cli.config, &cli.data, &slot, horizon).map(|()| ExitCode::SUCCESS)
@@ -370,12 +382,16 @@ async fn research_sync(config: &Path, data: &Path, slot: &str, days: u32) -> Res
     Ok(())
 }
 
-fn factors(config: &Path, data: &Path, slot: &str, horizon: usize) -> Result<()> {
-    use quorum_lab::factors::{FactorStudyConfig, study};
-
+/// A research slot's stored bars and the bars a year holds on its calendar: the research store,
+/// else the paper store with a note.
+fn research_series(
+    config: &Path,
+    data: &Path,
+    slot: &str,
+) -> Result<(SlotConfig, Vec<quorum_core::Series>, f64)> {
     let (slot, _) = load(config, slot)?;
     let quorum_slots::Universe::Fixed { instruments } = &slot.universe else {
-        bail!("{}: factor studies need a fixed universe for now", slot.id);
+        bail!("{}: studies need a fixed universe for now", slot.id);
     };
     let load = |store: &ParquetStore| -> Result<Vec<quorum_core::Series>> {
         let mut series = Vec::new();
@@ -404,10 +420,99 @@ fn factors(config: &Path, data: &Path, slot: &str, horizon: usize) -> Result<()>
         );
     }
     let step = quorum_runner::interval_duration(&slot.interval)?;
+    let per_year = slot.calendar.bars_per_year(step.num_seconds());
+    Ok((slot, series, per_year))
+}
+
+/// The slot's round-trip cost as a fraction.
+fn round_trip(slot: &SlotConfig) -> f64 {
+    2.0 * (slot.costs.fee_rate + slot.costs.slippage_bps / 10_000.0)
+}
+
+fn save_report(data: &Path, name: &str, report: &impl serde::Serialize) -> Result<PathBuf> {
+    let dir = data.join("reports");
+    std::fs::create_dir_all(&dir).with_context(|| format!("{}", dir.display()))?;
+    let path = dir.join(format!("{name}-{}.json", chrono::Utc::now().date_naive()));
+    std::fs::write(&path, serde_json::to_string_pretty(report)?)
+        .with_context(|| format!("{}", path.display()))?;
+    Ok(path)
+}
+
+fn regime(config: &Path, data: &Path, slot: &str, horizon: usize) -> Result<()> {
+    use quorum_lab::regime::{RegimeStudyConfig, Sample, study};
+
+    let (slot, series, periods_per_year) = research_series(config, data, slot)?;
+    let cfg = RegimeStudyConfig {
+        horizon,
+        cost: round_trip(&slot),
+        periods_per_year,
+        ..RegimeStudyConfig::default()
+    };
+    let report = study(&series, &cfg);
+    if let Some(now) = report.current {
+        let f = now.features;
+        println!(
+            "{} now ({}): {}  · vol ratio {:.2}, drawdown {:.0}%, breadth {:.0}%, trend {:+.0}%",
+            slot.id,
+            now.ts.date_naive(),
+            now.regime.as_str().to_uppercase(),
+            f.vol_ratio,
+            f.drawdown * 100.0,
+            f.breadth * 100.0,
+            f.trend * 100.0
+        );
+    }
+    let show = |name: &str, s: &Sample| {
+        println!(
+            "\n{name} {} → {} · forward {horizon} bars",
+            s.from
+                .map_or_else(String::new, |d| d.date_naive().to_string()),
+            s.to.map_or_else(String::new, |d| d.date_naive().to_string()),
+        );
+        println!(
+            "{:<10} {:>6} {:>12} {:>12}",
+            "regime", "share", "fwd return", "fwd vol/yr"
+        );
+        for r in &s.regimes {
+            println!(
+                "{:<10} {:>5.0}% {:>11.2}% {:>11.1}%",
+                r.regime.as_str(),
+                r.share * 100.0,
+                r.forward_return * 100.0,
+                r.forward_vol * 100.0
+            );
+        }
+        println!(
+            "separates risk: {}  ·  regime exposure: {:+.1}%/yr, Sharpe {:.2}, max DD {:.0}%  vs hold: {:+.1}%/yr, Sharpe {:.2}, max DD {:.0}%  → helps: {}",
+            if s.separates_risk { "yes" } else { "no" },
+            s.regime_exposure.annual_return * 100.0,
+            s.regime_exposure.sharpe,
+            s.regime_exposure.max_drawdown * 100.0,
+            s.hold.annual_return * 100.0,
+            s.hold.sharpe,
+            s.hold.max_drawdown * 100.0,
+            if s.exposure_helps { "yes" } else { "no" },
+        );
+    };
+    show("in-sample", &report.in_sample);
+    show("out-of-sample", &report.out_of_sample);
+    println!(
+        "\nexposure per regime (trending, choppy, risk-off, crisis): {:?}, fixed in advance, one bar late, after costs",
+        report.exposure
+    );
+    let path = save_report(data, &format!("regime-{}-h{horizon}", slot.id), &report)?;
+    println!("report: {}", path.display());
+    Ok(())
+}
+
+fn factors(config: &Path, data: &Path, slot: &str, horizon: usize) -> Result<()> {
+    use quorum_lab::factors::{FactorStudyConfig, study};
+
+    let (slot, series, periods_per_year) = research_series(config, data, slot)?;
     let cfg = FactorStudyConfig {
         horizon,
-        cost: 2.0 * (slot.costs.fee_rate + slot.costs.slippage_bps / 10_000.0),
-        periods_per_year: slot.calendar.bars_per_year(step.num_seconds()),
+        cost: round_trip(&slot),
+        periods_per_year,
         ..FactorStudyConfig::default()
     };
     let family = quorum_core::factors::price_family(cfg.periods_per_year);
