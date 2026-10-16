@@ -1786,6 +1786,7 @@ dependencies = [
  "chrono",
  "quorum-core",
  "serde",
+ "serde_json",
  "thiserror",
  "toml",
 ]
@@ -1885,6 +1886,7 @@ dependencies = [
  "quorum-data",
  "quorum-envelope",
  "quorum-journal",
+ "quorum-longterm",
  "quorum-risk",
  "quorum-slots",
  "serde",

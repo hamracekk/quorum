@@ -214,7 +214,7 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> RunnerError + '_ {
     }
 }
 
-fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
+pub(crate) fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     if !path.exists() {
         return Ok(None);
     }
@@ -228,7 +228,7 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
 }
 
 /// Writes through a temporary file and a rename, so a reader never sees half a file.
-fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
+pub(crate) fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
     let text = serde_json::to_string_pretty(value).map_err(|source| RunnerError::Json {
         path: path.display().to_string(),
         source,

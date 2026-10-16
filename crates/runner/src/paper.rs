@@ -18,7 +18,7 @@ use quorum_slots::{Evidence, Gates, SlotConfig, SlotState, Transition, Universe}
 use serde::Serialize;
 
 use crate::build::{backtest_config, interval_duration, strategy};
-use crate::gate::{GateBook, GatedBroker};
+use crate::gate::{GateBook, GateSession, GatedBroker};
 use crate::session::{Session, SlotFiles, StateFile};
 use crate::{Ports, Result, RunnerError};
 
@@ -127,13 +127,12 @@ pub async fn run(
     let broker = GatedBroker::new(
         Box::new(PaperBroker::new(cfg.fee_rate, cfg.slippage_bps).with_impact(cfg.impact)),
         Arc::clone(&ports.risk),
-        &session,
+        GateSession::slot(&session, &files),
         GateBook {
             mode,
             capital: cfg.initial_cash,
             interval_secs: step.num_seconds(),
         },
-        &files,
     )?;
     let start = Some(session.trade_from);
     let engine = Engine::with_broker(book.as_mut(), cfg, &instruments, start, Box::new(broker));
@@ -607,6 +606,9 @@ impl Live<'_> {
     ) -> Result<Status> {
         let interval = self.session.config.interval.clone();
         let mut stream = self.ports.stream.subscribe(instruments, &interval).await?;
+        // A halt pulled while the slot was down applies before its first live bar, not only at
+        // the first heartbeat (which may come after a short stream has already ended).
+        self.ping_risk().await;
         let mut ticks = tokio::time::interval(heartbeat);
         let mut shutdown = std::pin::pin!(shutdown);
         loop {

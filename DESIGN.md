@@ -585,7 +585,7 @@ Several factors have to agree before a trade happens. The repo is `quorum`, bina
 
 ---
 
-## 20. Long-term book (foundation built 2026-10-16)
+## 20. Long-term book (paper running and AI review built 2026-10-16)
 
 A buy-and-hold part of quorum, **separate from the trading slots**: its own envelope section and
 capital (never shared with or moved by the allocator), its own broker account or DIP so tax lots
@@ -600,7 +600,29 @@ the one engine (`Engine::deposit`, `Strategy::on_book`), contributions buy the m
 holdings, a band breach rebalances, fills become CZK tax lots (FIFO, three-year test). 2006–2026
 with 100k CZK + 5k a month (example policies, US ETFs as UCITS stand-ins): world equity 11.1%/yr
 money-weighted (drawdown 55%), balanced 60/30/10 8.9% (33%), 60/40 8.0% (35%); almost no tax,
-as lots outlive the time test. Next: paper running, IBKR UCITS prices, the AI review.
+as lots outlive the time test.
+
+**Paper (2026-10-16):** `quorum longterm paper` (launchd `com.quorum.longterm`, every 6 h) runs
+the first policy in `config/longterm.toml` from its start day: 100k CZK then 5k CZK each month
+(paper), end-of-day Tiingo prices of the US stand-ins in the book's own store
+(`data/longterm/`). Each run replays the session whole on the one engine; every order goes
+through the risk process as the book `longterm`, bounded by the envelope's `[longterm]` section
+(`position_max` 70%, no loss halts, the kill switch applies), with verdicts recorded and
+replayed. The policy is pinned in the session (a change needs `--fresh`). `quorum longterm
+status` shows holdings against targets, lots and their tax clocks.
+
+**AI review (2026-10-16):** when a review is due (`[review] every_days`, 91) the run asks Claude
+(`claude-opus-5-5`, `quorum_ai::holdings`) with the book's facts as inert data: holdings and
+drift, lots and tax clocks, costs, the allowed UCITS funds, earlier reviews with their decisions
+and scores. The answer is a closed schema: a summary, observations and at most three proposals,
+each a whole set of target weights over allowed instruments. Each proposal is costed now
+(trading + tax on lots under three years, FIFO), journaled (`reviews.jsonl`), decided by the
+operator (`quorum longterm reviews`, `decide`; `decisions.jsonl`) and scored afterwards: its
+weights bought and held after that cost against the book unchanged. Nothing is applied by the
+system; an accepted proposal is the operator's edit of the policy.
+
+Next: IBKR UCITS prices in place of the stand-ins; applying an accepted proposal inside the
+running session (a recorded policy change, switched with its real tax) instead of `--fresh`.
 
 ---
 

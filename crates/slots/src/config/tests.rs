@@ -101,6 +101,9 @@ fn live_start_modes_are_rejected() {
 
 #[test]
 fn invalid_values_are_rejected() {
+    assert!(
+        err(&SLOT.replace(r#"id = "crypto-spot""#, r#"id = "longterm""#)).contains("long-term")
+    );
     assert!(err(&SLOT.replace(r#"interval = "1d""#, r#"interval = "5m""#)).contains("interval"));
     assert!(err(&SLOT.replace("lookback = 60", "lookback = 0")).contains("lookback"));
     assert!(

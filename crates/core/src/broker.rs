@@ -39,6 +39,10 @@ pub trait Broker: fmt::Debug + Send {
     /// Simulated venues fill at least that far from the quote; live adapters ignore it.
     fn spread(&mut self, _instrument: &InstrumentId, _half_spread: f64) {}
 
+    /// Cash added to the account (a contribution; negative: a withdrawal). Simulated books that
+    /// track cash count it; live adapters ignore it (the venue reports its own balance).
+    fn deposit(&mut self, _amount: f64) {}
+
     /// Hand over a new order (status `New`). An `Err` means the order never reached the
     /// venue; the engine records it as rejected. Venue-side refusals are reported through
     /// [`poll`](Self::poll) as [`ExecutionReport::Rejected`] instead.

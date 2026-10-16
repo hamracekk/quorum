@@ -1,7 +1,7 @@
 //! The decisions, as pure functions of the state, the envelope and the request.
 
 use chrono::{DateTime, Utc};
-use quorum_envelope::{Envelope, LossLimits, Mode};
+use quorum_envelope::{Envelope, LONGTERM_BOOK, LossLimits, Mode};
 
 use crate::protocol::{OrderCheck, Verdict};
 use crate::state::{Halt, RiskState};
@@ -84,8 +84,19 @@ pub fn check(
     order: &OrderCheck,
     now: DateTime<Utc>,
 ) -> (Verdict, Vec<Transition>) {
+    // The long-term book has no loss halts: limits of 100% are never reached.
+    let loss = |e: &Envelope| {
+        if order.slot == LONGTERM_BOOK {
+            LossLimits {
+                daily_max: 1.0,
+                total_max: 1.0,
+            }
+        } else {
+            e.loss()
+        }
+    };
     let transitions = envelope.map_or_else(Vec::new, |e| {
-        observe(state, &order.slot, order.equity, e.loss(), now)
+        observe(state, &order.slot, order.equity, loss(e), now)
     });
     let verdict = decide(state, envelope, order, now);
     let risk = state.slots.entry(order.slot.clone()).or_default();
@@ -126,7 +137,16 @@ fn decide(
     if order.mode < Mode::Paper {
         return Verdict::reject(format!("slot is in {}; it does not trade", order.mode));
     }
-    let max = envelope.max_mode(&order.slot);
+    // The long-term book has its own bounds; without them it may not add risk at all.
+    let longterm = if order.slot == LONGTERM_BOOK {
+        match envelope.longterm() {
+            Some(bounds) => Some(bounds),
+            None => return Verdict::reject("the envelope has no [longterm] section"),
+        }
+    } else {
+        None
+    };
+    let max = longterm.map_or_else(|| envelope.max_mode(&order.slot), |lt| lt.max_mode);
     if order.mode > max {
         return Verdict::reject(format!(
             "slot is in {} but the envelope allows {max} at most",
@@ -156,7 +176,8 @@ fn decide(
         ));
     }
     let after = (order.position_after() * order.price).abs() / order.equity;
-    if let Some(max) = envelope.position_max()
+    let position_max = longterm.map_or_else(|| envelope.position_max(), |lt| Some(lt.position_max));
+    if let Some(max) = position_max
         && after > max * (1.0 + LEVERAGE_ALLOWANCE)
     {
         return Verdict::reject(format!(
@@ -165,8 +186,11 @@ fn decide(
             max * 100.0
         ));
     }
+    // Correlated holdings are the long-term book's policy (an operator decision), not a risk to
+    // cap per order.
     let cluster = order.cluster / order.equity;
-    if let Some(max) = envelope.cluster_max()
+    if longterm.is_none()
+        && let Some(max) = envelope.cluster_max()
         && cluster > max * (1.0 + LEVERAGE_ALLOWANCE)
     {
         return Verdict::reject(format!(

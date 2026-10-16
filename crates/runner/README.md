@@ -1,7 +1,8 @@
 # quorum-runner (`runner`)
 
 Paper-trades **one slot** end to end on the shared engine (`core::Engine`): the P0 port of
-trader's paper daemon, scoped to a slot and its envelope.
+trader's paper daemon, scoped to a slot and its envelope. Also runs the **long-term book** on
+paper (DESIGN §20) through the same engine and risk gate (`longterm.rs`).
 
 ## Module map
 
@@ -10,10 +11,12 @@ trader's paper daemon, scoped to a slot and its envelope.
 | `lib.rs` | `Ports` (market data, stream, bar store, journal, event log, notifier, risk gate, optional passive benchmark and extra lines (`DailyNote`, e.g. the shadow evaluator's record) for the daily summary), `RunnerError` |
 | `build.rs` | `strategy` (slot strategy → per-holding vol sizing → optional top-volume universe → optional book vol target), `backtest_config` (slot costs, brakes, exits + the envelope's daily loss), `interval_duration` |
 | `session.rs` | `SlotFiles` (`<data>/slots/<id>/`), `Session`, `StateFile`, `request_stop` |
-| `gate.rs` | `GatedBroker`: every order goes to the risk process first; verdicts recorded per session in `verdicts.jsonl` so replay repeats them |
+| `gate.rs` | `GatedBroker`: every order goes to the risk process first; verdicts recorded per session in `verdicts.jsonl` so replay repeats them; `deposit` adds contributions to the book it reports (`GateSession`: whose orders, which session, where verdicts go) |
+| `longterm.rs` | The long-term book on paper: `run_book` (lock → envelope `[longterm]` preflight → open/resume the session with its pinned policy → sync the holdings' daily bars into `<data>/longterm/bars` → replay from the first day with contributions through `quorum_longterm::drive` and a `GatedBroker` as book `longterm` → `state.json`, a note for new fills); `BookState`, `BookSession`; the review's inputs (`review_facts`, `book_now`, `book_weights`) |
 | `paper.rs` | `run`: preflight → open/resume → sync history → rebuild by replay → live loop; `RunOptions`, `Outcome`, `Status` |
 | `watchdog.rs` | The watchdog's decisions, pure: incidents (paper heartbeat stale or failed, recorder stale, risk process not answering or unable to read the envelope), alert once on open and once on recovery, skip right after a sleep |
 | `tests/paper.rs` | End to end on fakes: journaling from the start, resume == uninterrupted run, offline days, gap backfill, stop, refusals, risk gate (approval, process down, replayed verdicts) |
+| `tests/longterm.rs` | The long-term book on fakes: contributions invested through the gate, resume asks nothing twice, refused orders leave cash, a changed policy needs `--fresh`, the envelope must bound the book |
 
 ## A run
 
@@ -57,6 +60,11 @@ trader's paper daemon, scoped to a slot and its envelope.
 - A stop leaves the session open; the next run resumes it.
 - **One process per slot.** A run holds `<data>/slots/<id>/LOCK` (an OS file lock, released on
   exit or crash); a second run of the same slot is refused.
+- **The long-term book replays whole on every run.** It is a batch job (launchd every 6 h), not
+  a stream: each run feeds every stored close since the session's first day, with the start
+  amount and each month's contribution, through a fresh engine; recorded verdicts make the
+  replay repeat earlier decisions, so only new closes ask the risk process. Its policy and costs
+  are pinned in `session.json`; a change needs `--fresh` (the old session is archived).
 - `Status::restart` says whether a supervisor should start the run again (an ended stream, yes;
   a requested stop, no).
 

@@ -8,7 +8,7 @@ runs inside it.
 
 | File | What it holds |
 |---|---|
-| `lib.rs` | `Mode` (the autonomy ladder's rungs), `Envelope` (parse, validate, query), `SlotBounds`, `LossLimits`, `EnvelopeError` |
+| `lib.rs` | `Mode` (the autonomy ladder's rungs), `Envelope` (parse, validate, query), `SlotBounds`, `LongTermBounds` and `LONGTERM_BOOK`, `LossLimits`, `EnvelopeError` |
 | `tests.rs` | Parsing, validation, overrides, and a check that `config/envelope.toml` is valid |
 
 ## File format
@@ -24,6 +24,11 @@ loss = { daily_max = 0.05, total_max = 0.15 }      # fractions in (0, 1], daily 
 slot_default = { capital_max = 0, max_mode = "paper" }
 position_max = 0.25                                # optional, (0, leverage_max]: one position's share of equity
 cluster_max = 1.0                                  # optional: positions correlated ≥ 0.7 with one instrument
+
+[longterm]                                         # optional: the long-term book (DESIGN §20)
+capital_max = 0                                    # its own bounds; no loss halts
+max_mode = "paper"
+position_max = 0.70                                # one holding's share of the book
 
 [slots.crypto-spot]                                # optional per-slot override
 capital_max = 2000                                 # ≤ capital_total

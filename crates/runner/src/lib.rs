@@ -7,11 +7,14 @@
 //! has no order path to a venue. Every order is approved by the risk process first (see
 //! `gate`); its verdicts are recorded per session so replay repeats them.
 //!
+//! The long-term book (DESIGN §20) runs on the same engine and gate: [`longterm`].
+//!
 //! Files per slot live in `<data>/slots/<id>/` (see [`SlotFiles`]); bars, journal and event log
 //! go through the ports in [`Ports`], so tests run on fakes.
 
 mod build;
 mod gate;
+pub mod longterm;
 mod paper;
 mod session;
 pub mod watchdog;

@@ -10,12 +10,12 @@ use std::path::Path;
 
 use quorum_core::strategy::BookView;
 use quorum_core::{Bar, InstrumentId, Strategy};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::LongTermError;
 
 /// One holding of a policy.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Holding {
     pub instrument: InstrumentId,
@@ -23,7 +23,7 @@ pub struct Holding {
 }
 
 /// A long-term policy.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
     pub name: String,
@@ -57,6 +57,9 @@ pub struct LongTermConfig {
     pub slippage_bps: f64,
     /// The first is the operator's policy; the others are alternatives it is compared with.
     pub policies: Vec<Policy>,
+    /// The AI review of the paper book (off when absent).
+    #[serde(default)]
+    pub review: crate::review::ReviewConfig,
 }
 
 impl LongTermConfig {
@@ -71,6 +74,9 @@ impl LongTermConfig {
         let invalid = |m: String| Err(LongTermError::Config(m));
         if cfg.policies.is_empty() {
             return invalid("no policies".to_owned());
+        }
+        if cfg.review.every_days < 7 || cfg.review.model.trim().is_empty() {
+            return invalid("review: every_days ≥ 7 and a model".to_owned());
         }
         let cost = |x: f64| x.is_finite() && (0.0..0.05).contains(&x);
         if !cost(cfg.fx_cost) || !cost(cfg.fee_rate) || !cost(cfg.slippage_bps / 10_000.0) {
