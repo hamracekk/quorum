@@ -637,3 +637,65 @@ async fn replay_repeats_the_recorded_verdicts() {
     assert_eq!(w.risk.checks().len(), asked, "replay asked nothing");
     assert!((second.equity - first.equity).abs() < 1e-9);
 }
+
+#[tokio::test]
+async fn a_risk_halt_sells_everything_at_the_next_bar_and_resumes_the_same_way() {
+    let w = World::new("gate-flatten").await;
+    let first = run(
+        &w.ports(30, live(30..35)),
+        &slot(),
+        &envelope(),
+        &w.options(day(30) + Duration::minutes(5)),
+        std::future::pending(),
+    )
+    .await
+    .expect("first run");
+    let files = SlotFiles::new(&w.data, &slot().id);
+    let held = files
+        .load_state()
+        .expect("state")
+        .expect("written")
+        .positions;
+    assert!(held > 0, "the strategy holds something to sell");
+
+    // The kill switch is pulled: the next run's first heartbeat flattens.
+    w.risk.set(FakeMode::Halted(quorum_risk::Halt::Operator {
+        reason: "drill".to_owned(),
+    }));
+    let second = run(
+        &w.ports(35, live(35..37)),
+        &slot(),
+        &envelope(),
+        &w.options(day(35)),
+        std::future::pending(),
+    )
+    .await
+    .expect("halted run");
+    assert_eq!(second.session_id, first.session_id);
+    let state = files.load_state().expect("state").expect("written");
+    assert_eq!(state.positions, 0, "every position sold");
+    assert!(
+        std::fs::read_to_string(files.risk_caps())
+            .expect("recorded")
+            .contains("drill")
+    );
+    assert!(
+        w.notes
+            .sent()
+            .iter()
+            .any(|n| n.title.contains("flattening"))
+    );
+
+    // A resume replays the cap at the same point: the same book, nothing asked again.
+    w.risk.set(FakeMode::Allow);
+    let third = run(
+        &w.ports(37, Vec::new()),
+        &slot(),
+        &envelope(),
+        &w.options(day(37)),
+        std::future::pending(),
+    )
+    .await
+    .expect("resumed run");
+    assert!((third.equity - second.equity).abs() < 1e-9);
+}

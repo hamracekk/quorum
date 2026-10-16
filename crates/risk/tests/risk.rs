@@ -20,6 +20,8 @@ leverage_max = 1.0
 venues_allowed = ["binance"]
 loss = { daily_max = 0.05, total_max = 0.15 }
 slot_default = { capital_max = 0, max_mode = "paper" }
+position_max = 0.6
+cluster_max = 0.8
 "#;
 
 fn envelope() -> Envelope {
@@ -44,7 +46,9 @@ fn buy(qty: f64, equity: f64) -> OrderCheck {
         position: 0.0,
         gross: 0.0,
         equity,
+        cluster: qty * 100.0,
         ts: at(16, 0),
+        interval_secs: 0,
     }
 }
 
@@ -167,6 +171,47 @@ fn modes_above_the_envelope_and_live_modes_are_refused() {
     let (ok, reason) = verdict(&mut state, &live, at(16, 1));
     assert!(!ok);
     assert!(reason.contains("allows paper"), "{reason}");
+}
+
+#[test]
+fn a_position_or_a_correlated_cluster_above_its_limit_is_refused() {
+    let mut state = RiskState::default();
+    // 70 × 100 = 70% of equity in one coin: over position_max 60%.
+    let (ok, reason) = verdict(&mut state, &buy(70.0, 10_000.0), at(16, 1));
+    assert!(!ok);
+    assert!(reason.contains("position_max"), "{reason}");
+    // 50% in this coin, but 90% in coins moving with it: over cluster_max 80%.
+    let crowded = OrderCheck {
+        cluster: 9_000.0,
+        ..buy(50.0, 10_000.0)
+    };
+    let (ok, reason) = verdict(&mut state, &crowded, at(16, 1));
+    assert!(!ok);
+    assert!(reason.contains("cluster_max"), "{reason}");
+    assert!(verdict(&mut state, &buy(50.0, 10_000.0), at(16, 1)).0);
+}
+
+#[test]
+fn an_order_on_stale_data_adds_no_risk() {
+    let mut state = RiskState::default();
+    let daily = OrderCheck {
+        interval_secs: 86_400,
+        ..buy(1.0, 10_000.0)
+    };
+    // The bar of 16 Oct 00:00 is current until about 18 Oct 01:00.
+    assert!(verdict(&mut state, &daily, at(17, 12)).0);
+    let (ok, reason) = verdict(&mut state, &daily, at(19, 0));
+    assert!(!ok);
+    assert!(reason.contains("stale"), "{reason}");
+    let selling = OrderCheck {
+        side: Side::Sell,
+        position: 5.0,
+        ..daily
+    };
+    assert!(
+        verdict(&mut state, &selling, at(19, 0)).0,
+        "reducing still passes"
+    );
 }
 
 #[test]

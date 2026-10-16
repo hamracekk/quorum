@@ -6,6 +6,9 @@ use quorum_envelope::{Envelope, LossLimits, Mode};
 use crate::protocol::{OrderCheck, Verdict};
 use crate::state::{Halt, RiskState};
 
+/// Slack on top of two intervals before an order's bar counts as stale (processing, a slow feed).
+pub const STALE_GRACE_SECS: i64 = 3_600;
+
 /// Leeway on `leverage_max`: fees and slippage leave a fully invested spot book a hair over 1×.
 pub const LEVERAGE_ALLOWANCE: f64 = 0.01;
 
@@ -84,7 +87,7 @@ pub fn check(
     let transitions = envelope.map_or_else(Vec::new, |e| {
         observe(state, &order.slot, order.equity, e.loss(), now)
     });
-    let verdict = decide(state, envelope, order);
+    let verdict = decide(state, envelope, order, now);
     let risk = state.slots.entry(order.slot.clone()).or_default();
     if verdict.approved {
         risk.approved += 1;
@@ -94,7 +97,12 @@ pub fn check(
     (verdict, transitions)
 }
 
-fn decide(state: &RiskState, envelope: Option<&Envelope>, order: &OrderCheck) -> Verdict {
+fn decide(
+    state: &RiskState,
+    envelope: Option<&Envelope>,
+    order: &OrderCheck,
+    now: DateTime<Utc>,
+) -> Verdict {
     let valid = order.qty.is_finite() && order.qty > 0.0 && order.price.is_finite();
     if valid && order.position.is_finite() && order.reduces_risk() {
         return Verdict::approve("reduces risk");
@@ -104,6 +112,16 @@ fn decide(state: &RiskState, envelope: Option<&Envelope>, order: &OrderCheck) ->
     };
     if let Some(halt) = state.halt_for(&order.slot) {
         return Verdict::reject(halt.describe());
+    }
+    // An order on a bar more than two intervals old was decided on stale data (a gap, a sleep, a
+    // stalled feed): no new risk on it.
+    if order.interval_secs > 0
+        && (now - order.ts).num_seconds() > 2 * order.interval_secs + STALE_GRACE_SECS
+    {
+        return Verdict::reject(format!(
+            "stale data: the order's bar is {} h old",
+            (now - order.ts).num_hours()
+        ));
     }
     if order.mode < Mode::Paper {
         return Verdict::reject(format!("slot is in {}; it does not trade", order.mode));
@@ -135,6 +153,26 @@ fn decide(state: &RiskState, envelope: Option<&Envelope>, order: &OrderCheck) ->
         return Verdict::reject(format!(
             "gross exposure {leverage:.2}× equity exceeds leverage_max {:.2}×",
             envelope.leverage_max()
+        ));
+    }
+    let after = (order.position_after() * order.price).abs() / order.equity;
+    if let Some(max) = envelope.position_max()
+        && after > max * (1.0 + LEVERAGE_ALLOWANCE)
+    {
+        return Verdict::reject(format!(
+            "position {:.0}% of equity exceeds position_max {:.0}%",
+            after * 100.0,
+            max * 100.0
+        ));
+    }
+    let cluster = order.cluster / order.equity;
+    if let Some(max) = envelope.cluster_max()
+        && cluster > max * (1.0 + LEVERAGE_ALLOWANCE)
+    {
+        return Verdict::reject(format!(
+            "correlated cluster {:.0}% of equity exceeds cluster_max {:.0}%",
+            cluster * 100.0,
+            max * 100.0
         ));
     }
     Verdict::approve("within the envelope")

@@ -113,6 +113,10 @@ struct Raw {
     slot_default: SlotBounds,
     #[serde(default)]
     slots: BTreeMap<String, SlotBounds>,
+    #[serde(default)]
+    position_max: Option<f64>,
+    #[serde(default)]
+    cluster_max: Option<f64>,
 }
 
 /// The operator's envelope. Build it with [`Envelope::load`] or [`Envelope::parse`].
@@ -125,6 +129,8 @@ pub struct Envelope {
     loss: LossLimits,
     slot_default: SlotBounds,
     slots: BTreeMap<String, SlotBounds>,
+    position_max: Option<f64>,
+    cluster_max: Option<f64>,
 }
 
 impl Envelope {
@@ -148,6 +154,8 @@ impl Envelope {
             loss: raw.loss,
             slot_default: raw.slot_default,
             slots: raw.slots,
+            position_max: raw.position_max,
+            cluster_max: raw.cluster_max,
         };
         envelope.validate()?;
         Ok(envelope)
@@ -170,6 +178,16 @@ impl Envelope {
         let fraction = |x: f64| x.is_finite() && x > 0.0 && x <= 1.0;
         if !fraction(self.loss.daily_max) || !fraction(self.loss.total_max) {
             return invalid("loss limits must be fractions in (0, 1]".to_owned());
+        }
+        for (name, limit) in [
+            ("position_max", self.position_max),
+            ("cluster_max", self.cluster_max),
+        ] {
+            if let Some(x) = limit
+                && !(x.is_finite() && x > 0.0 && x <= self.leverage_max)
+            {
+                return invalid(format!("{name} {x} must be in (0, leverage_max]"));
+            }
         }
         if self.loss.daily_max > self.loss.total_max {
             return invalid("loss.daily_max exceeds loss.total_max".to_owned());
@@ -214,6 +232,19 @@ impl Envelope {
     #[must_use]
     pub const fn loss(&self) -> LossLimits {
         self.loss
+    }
+
+    /// Most one position may be worth, as a fraction of the slot's equity; `None`: no own limit.
+    #[must_use]
+    pub const fn position_max(&self) -> Option<f64> {
+        self.position_max
+    }
+
+    /// Most the positions moving together with one instrument (return correlation of at least
+    /// 0.7, itself included) may be worth, as a fraction of equity; `None`: no limit.
+    #[must_use]
+    pub const fn cluster_max(&self) -> Option<f64> {
+        self.cluster_max
     }
 
     /// Whether `venue` may be traded at all (paper included).

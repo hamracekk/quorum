@@ -18,7 +18,7 @@ use quorum_slots::{Evidence, Gates, SlotConfig, SlotState, Transition, Universe}
 use serde::Serialize;
 
 use crate::build::{backtest_config, interval_duration, strategy};
-use crate::gate::GatedBroker;
+use crate::gate::{GateBook, GatedBroker};
 use crate::session::{Session, SlotFiles, StateFile};
 use crate::{Ports, Result, RunnerError};
 
@@ -124,22 +124,19 @@ pub async fn run(
     let mut book = strategy(slot, instruments.len())?;
     let cfg = backtest_config(slot, envelope);
     let daily_limit = cfg.risk.max_daily_loss;
-    let venue = PaperBroker::new(cfg.fee_rate, cfg.slippage_bps).with_impact(cfg.impact);
     let broker = GatedBroker::new(
-        Box::new(venue),
+        Box::new(PaperBroker::new(cfg.fee_rate, cfg.slippage_bps).with_impact(cfg.impact)),
         Arc::clone(&ports.risk),
         &session,
-        mode,
-        cfg.initial_cash,
+        GateBook {
+            mode,
+            capital: cfg.initial_cash,
+            interval_secs: step.num_seconds(),
+        },
         &files,
     )?;
-    let engine = Engine::with_broker(
-        book.as_mut(),
-        cfg,
-        &instruments,
-        Some(session.trade_from),
-        Box::new(broker),
-    );
+    let start = Some(session.trade_from);
+    let engine = Engine::with_broker(book.as_mut(), cfg, &instruments, start, Box::new(broker));
     let mut live = Live {
         ports,
         files,
@@ -156,6 +153,7 @@ pub async fn run(
         daily_limit,
         mode,
         risk_down: false,
+        flat_until: None,
     };
     live.rebuild(&instruments, history).await?;
     let snapshot = live.engine.snapshot();
@@ -416,6 +414,28 @@ struct Live<'s> {
     mode: Mode,
     /// The last heartbeat to the risk process failed (alerted once per outage).
     risk_down: bool,
+    /// Targets are capped at 0 until then: the risk process halted the slot.
+    flat_until: Option<DateTime<Utc>>,
+}
+
+/// An exposure cap applied for a risk halt, replayed at the same point on resume.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+struct RiskCap {
+    session: String,
+    /// Applied once every bar up to this time was processed.
+    after: DateTime<Utc>,
+    until: DateTime<Utc>,
+    reason: String,
+}
+
+/// The session's recorded caps, in order. Unreadable lines are skipped.
+fn load_caps(files: &SlotFiles, session: &str) -> Vec<RiskCap> {
+    std::fs::read_to_string(files.risk_caps())
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<RiskCap>(l).ok())
+        .filter(|c| c.session == session)
+        .collect()
 }
 
 impl Live<'_> {
@@ -542,8 +562,15 @@ impl Live<'_> {
         bars.sort_by_key(|&(r, _, bar)| (bar.ts, r));
 
         let watermark = self.session.journaled_until;
+        let mut caps = load_caps(&self.files, &self.session.id)
+            .into_iter()
+            .peekable();
         let mut fresh = Vec::new();
         for (_, instrument, bar) in bars {
+            // A cap applied live after the bars up to `after` is applied at the same point.
+            while let Some(cap) = caps.next_if(|c| c.after < bar.ts) {
+                self.apply_cap(&cap);
+            }
             let events = self.engine.on_bar(instrument, bar)?;
             if watermark.is_none_or(|w| bar.ts > w) && bar.ts >= self.session.trade_from {
                 fresh.push(Event::Bar {
@@ -553,6 +580,9 @@ impl Live<'_> {
                 fresh.extend(events);
                 self.session.journaled_until = Some(bar.ts);
             }
+        }
+        for cap in caps {
+            self.apply_cap(&cap);
         }
         self.publish(&fresh);
         let decisions: Vec<Event> = fresh
@@ -624,6 +654,12 @@ impl Live<'_> {
             Ok(halt) => {
                 if let Some(halt) = halt {
                     tracing::info!(halt = %halt.describe(), "risk process: no new risk for this slot");
+                    if matches!(
+                        halt,
+                        quorum_risk::Halt::Operator { .. } | quorum_risk::Halt::Total
+                    ) {
+                        self.flatten_for(&halt).await;
+                    }
                 }
                 if self.risk_down {
                     self.risk_down = false;
@@ -647,6 +683,69 @@ impl Live<'_> {
                         .send()
                         .await;
                 }
+            }
+        }
+    }
+
+    /// Caps every target at 0 for three bars, extended while the halt lasts: positions are sold
+    /// at the next bar through the normal order path (risk-reducing, so the gate lets them pass)
+    /// and the strategy re-enters after the halt is lifted. Recorded for replay.
+    async fn flatten_for(&mut self, halt: &quorum_risk::Halt) {
+        let Some(after) = self.session.journaled_until else {
+            return;
+        };
+        if self
+            .flat_until
+            .is_some_and(|until| until > after + self.step + self.step)
+        {
+            return;
+        }
+        let first = self.flat_until.is_none_or(|until| until <= after);
+        let cap = RiskCap {
+            session: self.session.id.clone(),
+            after,
+            until: after + self.step * 3,
+            reason: halt.describe(),
+        };
+        let events = self.apply_cap(&cap);
+        let line = serde_json::to_string(&cap).map_err(std::io::Error::other);
+        let written = line.and_then(|line| {
+            use std::io::Write as _;
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(self.files.risk_caps())?;
+            writeln!(file, "{line}")
+        });
+        if let Err(err) = written {
+            tracing::error!(error = %err, "risk cap not recorded: a resume will not replay it");
+        }
+        self.publish(&events);
+        if let Err(err) = self.ports.journal.record(&self.session.id, &events).await {
+            tracing::error!(error = %err, "risk cap not journaled");
+        }
+        if first {
+            let body = format!(
+                "{} · every position is sold at the next bar; the strategy resumes after the halt is lifted",
+                halt.describe()
+            );
+            self.note(Severity::Critical, "flattening", &body)
+                .send()
+                .await;
+        }
+    }
+
+    /// Applies a recorded cap to the engine; returns its decision events.
+    fn apply_cap(&mut self, cap: &RiskCap) -> Vec<Event> {
+        self.flat_until = Some(self.flat_until.map_or(cap.until, |u| u.max(cap.until)));
+        match self
+            .engine
+            .reduce_exposure(0.0, cap.until, &format!("risk halt: {}", cap.reason))
+        {
+            Ok(events) => events,
+            Err(err) => {
+                tracing::error!(error = %err, "risk cap refused by the engine");
+                Vec::new()
             }
         }
     }

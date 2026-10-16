@@ -1,7 +1,7 @@
 //! The paper order path through the risk process: every order the engine sends is approved by
 //! it first, and every verdict is recorded so replay makes the same decisions.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use quorum_core::{Broker, ExecutionReport, InstrumentId, Order, OrderId, PortError, Side};
 use quorum_envelope::Mode;
-use quorum_risk::{OrderCheck, RiskGate, Verdict};
+use quorum_risk::{CLUSTER_CORRELATION, OrderCheck, RiskGate, Verdict};
 use serde::{Deserialize, Serialize};
 
 use crate::session::{Session, SlotFiles};
@@ -53,15 +53,29 @@ pub(crate) struct GatedBroker {
     cash: f64,
     positions: BTreeMap<InstrumentId, f64>,
     marks: BTreeMap<InstrumentId, f64>,
+    /// Recent quotes per instrument, for the correlation behind `OrderCheck::cluster`.
+    closes: BTreeMap<InstrumentId, VecDeque<f64>>,
+    interval_secs: i64,
 }
+
+/// What the gate tells the risk process about the slot besides its orders.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GateBook {
+    pub(crate) mode: Mode,
+    /// The paper capital the slot's book starts from.
+    pub(crate) capital: f64,
+    pub(crate) interval_secs: i64,
+}
+
+/// Quotes behind a correlation (60 returns).
+const CORRELATION_QUOTES: usize = 61;
 
 impl GatedBroker {
     pub(crate) fn new(
         inner: Box<dyn Broker>,
         gate: Arc<dyn RiskGate>,
         session: &Session,
-        mode: Mode,
-        capital: f64,
+        book: GateBook,
         files: &SlotFiles,
     ) -> Result<Self> {
         let log = files.verdicts();
@@ -69,20 +83,43 @@ impl GatedBroker {
             inner,
             gate,
             slot: session.slot.as_str().to_owned(),
-            mode,
+            mode: book.mode,
             session: session.id.clone(),
             replay_until: session.journaled_until,
             recorded: load(&log, &session.id)?,
             log,
-            cash: capital,
+            cash: book.capital,
             positions: BTreeMap::new(),
             marks: BTreeMap::new(),
+            closes: BTreeMap::new(),
+            interval_secs: book.interval_secs,
         })
     }
 
     fn check(&self, order: &Order) -> OrderCheck {
         let value =
             |(id, qty): (&InstrumentId, &f64)| qty * self.marks.get(id).copied().unwrap_or(0.0);
+        let price = self.marks.get(&order.instrument).copied().unwrap_or(0.0);
+        let held = self
+            .positions
+            .get(&order.instrument)
+            .copied()
+            .unwrap_or(0.0);
+        let after = match order.side {
+            Side::Buy => held + order.qty,
+            Side::Sell => held - order.qty,
+        };
+        let cluster = (after * price).abs()
+            + self
+                .positions
+                .iter()
+                .filter(|(id, _)| *id != &order.instrument)
+                .filter(|(id, _)| {
+                    self.correlation(id, &order.instrument)
+                        .is_some_and(|c| c >= CLUSTER_CORRELATION)
+                })
+                .map(|p| value(p).abs())
+                .sum::<f64>();
         OrderCheck {
             slot: self.slot.clone(),
             mode: self.mode,
@@ -97,8 +134,41 @@ impl GatedBroker {
                 .unwrap_or(0.0),
             gross: self.positions.iter().map(|p| value(p).abs()).sum(),
             equity: self.cash + self.positions.iter().map(value).sum::<f64>(),
+            cluster,
             ts: order.created_at,
+            interval_secs: self.interval_secs,
         }
+    }
+
+    /// Correlation of the two instruments' latest quote-to-quote returns; `None` with fewer
+    /// than 20 in common.
+    fn correlation(&self, a: &InstrumentId, b: &InstrumentId) -> Option<f64> {
+        let returns = |id: &InstrumentId| -> Option<Vec<f64>> {
+            let q = self.closes.get(id)?;
+            Some(
+                q.iter()
+                    .zip(q.iter().skip(1))
+                    .filter(|(x, _)| **x > 0.0)
+                    .map(|(x, y)| y / x - 1.0)
+                    .collect(),
+            )
+        };
+        let (ra, rb) = (returns(a)?, returns(b)?);
+        let n = ra.len().min(rb.len());
+        if n < 20 {
+            return None;
+        }
+        let (ra, rb) = (&ra[ra.len() - n..], &rb[rb.len() - n..]);
+        let mean = |xs: &[f64]| xs.iter().sum::<f64>() / xs.len() as f64;
+        let (ma, mb) = (mean(ra), mean(rb));
+        let (mut sab, mut saa, mut sbb) = (0.0, 0.0, 0.0);
+        for (x, y) in ra.iter().zip(rb) {
+            sab = (x - ma).mul_add(y - mb, sab);
+            saa = (x - ma).mul_add(x - ma, saa);
+            sbb = (y - mb).mul_add(y - mb, sbb);
+        }
+        let r = sab / (saa * sbb).sqrt();
+        r.is_finite().then_some(r)
     }
 
     fn verdict(&mut self, order: &Order) -> Verdict {
@@ -160,6 +230,11 @@ impl Broker for GatedBroker {
 
     fn quote(&mut self, instrument: &InstrumentId, ts: DateTime<Utc>, price: f64) {
         self.marks.insert(instrument.clone(), price);
+        let closes = self.closes.entry(instrument.clone()).or_default();
+        closes.push_back(price);
+        if closes.len() > CORRELATION_QUOTES {
+            closes.pop_front();
+        }
         self.inner.quote(instrument, ts, price);
     }
 
