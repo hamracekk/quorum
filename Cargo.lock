@@ -1642,6 +1642,7 @@ dependencies = [
  "quorum-core",
  "quorum-data",
  "quorum-envelope",
+ "quorum-evaluator",
  "quorum-journal",
  "quorum-knowledge",
  "quorum-lab",
@@ -1707,6 +1708,16 @@ dependencies = [
  "serde",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "quorum-evaluator"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "quorum-core",
+ "quorum-lab",
+ "serde",
 ]
 
 [[package]]
