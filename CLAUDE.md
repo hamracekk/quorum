@@ -51,6 +51,11 @@ change when its module map, invariants or extension steps change.
   (after costs, before and after the slots' tax, corrected for the comparisons made) and the daily
   summary shows it. Nothing earns
   live capital without beating it out of sample.
+- **The long-term book is separate and only proposed to.** It runs as the book `longterm` under
+  the envelope's `[longterm]` bounds, with its own store and session in `data/longterm/`; no slot
+  may take the name and nothing in it feeds a slot or the allocator. Its AI review proposes
+  whole target weights (closed schema, `quorum_ai::holdings`); proposals are costed, journaled,
+  decided by the operator and scored against the book unchanged, never applied by the system.
 - **The evaluator is shadow until it earns weight.** `quorum_evaluator` builds case files and
   labels every proposed entry, taken or not; nothing it computes reaches a target, order or size
   until a meta model beats "always take" out of sample (DESIGN §10, P5 exit).
@@ -99,4 +104,7 @@ cargo run --release -p quorum-cli -- allocate   # walk-forward each slot, study 
 cargo run --release -p quorum-cli -- stress     # stress gate: crises and synthetic shocks per slot and book
 cargo run --release -p quorum-cli -- evaluate --slot crypto-spot [--source paper]   # trade evaluator (shadow)
 cargo run --release -p quorum-cli -- longterm backtest   # long-term book: policies in CZK, contributions, tax lots
+cargo run --release -p quorum-cli -- longterm paper | status   # the long-term book on paper (resumes by replay)
+cargo run --release -p quorum-cli -- longterm reviews | review | decide   # its AI review: proposals, costs, decisions
+./deploy/launchd/install-longterm.sh        # the long-term book every 6 hours (needs the risk process)
 ```

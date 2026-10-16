@@ -90,3 +90,27 @@ fn modes_are_ordered_and_step_one_rung() {
     assert!(!Mode::Paper.is_live() && Mode::LiveMicro.is_live());
     assert_eq!(Mode::LiveMicro.to_string(), "live-micro");
 }
+
+#[test]
+fn the_longterm_book_has_its_own_bounds() {
+    assert_eq!(Envelope::parse(PAPER).expect("valid").longterm(), None);
+    let text = with("[longterm]\ncapital_max = 0\nmax_mode = \"paper\"\nposition_max = 0.7");
+    let env = Envelope::parse(&text).expect("valid");
+    let lt = env.longterm().expect("bounds");
+    assert!((lt.position_max - 0.7).abs() < f64::EPSILON);
+    assert_eq!(lt.max_mode, Mode::Paper);
+    assert!(env.is_paper_only());
+
+    let live = text.replace(
+        "max_mode = \"paper\"\nposition_max",
+        "max_mode = \"live\"\nposition_max",
+    );
+    let err = Envelope::parse(&live).expect_err("live without capital");
+    assert!(err.to_string().contains("longterm"), "{err}");
+    assert!(
+        Envelope::parse(&text.replace("0.7", "1.5")).is_err(),
+        "over leverage_max"
+    );
+    let as_slot = with("[slots.longterm]\ncapital_max = 0\nmax_mode = \"paper\"");
+    assert!(Envelope::parse(&as_slot).is_err(), "the name is reserved");
+}

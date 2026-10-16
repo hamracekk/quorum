@@ -44,6 +44,22 @@ records the time. Read-only: it never starts, stops or trades anything.
 ./deploy/launchd/uninstall-watchdog.sh
 ```
 
+### The long-term book
+
+`com.quorum.longterm` runs `quorum longterm paper` at login and every 6 hours, then exits. Each run
+replays the book (`data/longterm/`), invests new closes and the month's paper contribution
+through the risk process, and asks for the AI review when one is due (`config/longterm.toml`
+`[review]`). It needs the risk process, the Tiingo key, the Anthropic key for the review, and a
+`[longterm]` section in the envelope. A missed run only delays the next orders.
+
+```bash
+./deploy/launchd/install-longterm.sh
+quorum longterm status                      # holdings vs targets, lots and tax clocks
+quorum longterm reviews                     # proposals, their cost, your decisions, the score
+tail -f ~/Library/Logs/quorum/longterm.log
+./deploy/launchd/uninstall-longterm.sh
+```
+
 ### The risk process
 
 `com.quorum.risk` runs `quorum risk run`, the only approver of orders (DESIGN §9). Paper slots

@@ -30,6 +30,14 @@ cluster_max = 1.0
 # Bounds for every slot without its own entry below.
 slot_default = { capital_max = 0, max_mode = "paper" }
 
+# The long-term book (DESIGN §20): buy-and-hold, apart from the slots and the allocator. No loss
+# halts (it rides out drawdowns by design; the kill switch still applies). A broad index fund may
+# be most of it, so one holding may reach 70% of the book (operator decision pending; example).
+[longterm]
+capital_max = 0
+max_mode = "paper"
+position_max = 0.70
+
 # Per-slot overrides, e.g.:
 # [slots.crypto-spot]
 # capital_max = 2000

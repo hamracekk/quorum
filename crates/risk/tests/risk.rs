@@ -192,6 +192,40 @@ fn a_position_or_a_correlated_cluster_above_its_limit_is_refused() {
 }
 
 #[test]
+fn the_longterm_book_has_its_own_bounds_and_no_loss_halts() {
+    let longterm = |order: OrderCheck| OrderCheck {
+        slot: quorum_envelope::LONGTERM_BOOK.to_owned(),
+        ..order
+    };
+    let mut state = RiskState::default();
+    // Without a [longterm] section the book adds no risk.
+    let (ok, reason) = verdict(&mut state, &longterm(buy(10.0, 10_000.0)), at(16, 1));
+    assert!(!ok);
+    assert!(reason.contains("[longterm]"), "{reason}");
+
+    let bounded = Envelope::parse(&format!(
+        "{ENVELOPE}\n[longterm]\ncapital_max = 0\nmax_mode = \"paper\"\nposition_max = 0.7"
+    ))
+    .expect("valid");
+    let ask = |state: &mut RiskState, order: &OrderCheck, now| {
+        let (v, transitions) = rules::check(state, Some(&bounded), order, now);
+        assert!(transitions.is_empty(), "no loss halts: {transitions:?}");
+        (v.approved, v.reason)
+    };
+    // 65% in one fund: over the slots' 60%, within the book's 70%; the cluster is not capped.
+    let (ok, reason) = ask(&mut state, &longterm(buy(65.0, 10_000.0)), at(16, 1));
+    assert!(ok, "{reason}");
+    let (ok, reason) = ask(&mut state, &longterm(buy(75.0, 10_000.0)), at(16, 1));
+    assert!(!ok);
+    assert!(reason.contains("position_max 70%"), "{reason}");
+    // A 40% fall in a day halts no long-term book.
+    assert!(ask(&mut state, &longterm(buy(1.0, 6_000.0)), at(16, 2)).0);
+    // The kill switch still does.
+    rules::halt(&mut state, None, "operator");
+    assert!(!ask(&mut state, &longterm(buy(1.0, 6_000.0)), at(16, 3)).0);
+}
+
+#[test]
 fn an_order_on_stale_data_adds_no_risk() {
     let mut state = RiskState::default();
     let daily = OrderCheck {

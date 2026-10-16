@@ -9,6 +9,7 @@
 
 pub mod claude;
 pub mod extract;
+pub mod holdings;
 pub mod ollama;
 pub mod review;
 pub mod themes;

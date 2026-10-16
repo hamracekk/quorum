@@ -403,6 +403,7 @@ impl<'s> Engine<'s> {
     /// itself: a strategy that invests it does so through `Strategy::on_book`.
     pub fn deposit(&mut self, amount: f64) {
         self.portfolio.deposit(amount);
+        self.broker.deposit(amount);
     }
 
     /// Net funding paid so far (negative: received).

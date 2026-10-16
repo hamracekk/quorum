@@ -158,3 +158,180 @@ fn a_policy_run_contributes_monthly_and_grows_in_czk() {
     assert_eq!(r.sells, 0, "steady drift inside the band never sells");
     assert!(r.trades > 2);
 }
+
+mod review {
+    use super::*;
+    use quorum_longterm::Lot;
+    use quorum_longterm::review::{
+        BookNow, Costed, Decision, Position, Proposal, ReviewJournal, ReviewRecord, SwitchCost,
+        due, score, switch_cost,
+    };
+
+    fn holding(t: &str, weight: f64) -> Holding {
+        Holding {
+            instrument: id(t),
+            weight,
+        }
+    }
+
+    /// 60k in EQ (two lots: one old, one young) and 40k in BD, at 100 CZK a unit.
+    fn book() -> BookNow {
+        let lot = |qty, bought, cost_czk| Lot {
+            qty,
+            bought,
+            cost_czk,
+        };
+        BookNow {
+            positions: vec![
+                Position {
+                    instrument: id("EQ"),
+                    value_czk: 60_000.0,
+                    price_czk: 100.0,
+                },
+                Position {
+                    instrument: id("BD"),
+                    value_czk: 40_000.0,
+                    price_czk: 100.0,
+                },
+            ],
+            lots: vec![
+                (id("EQ"), lot(300.0, at(2020, 1, 1), 50.0)),
+                (id("EQ"), lot(300.0, at(2025, 6, 1), 80.0)),
+                (id("BD"), lot(400.0, at(2025, 6, 1), 100.0)),
+            ],
+            equity_czk: 100_000.0,
+        }
+    }
+
+    #[test]
+    fn a_switch_costs_trading_and_tax_on_young_lots_only() {
+        let now = at(2026, 10, 1);
+        // Keeping the weights costs nothing.
+        let keep = switch_cost(
+            &book(),
+            &[holding("EQ", 0.6), holding("BD", 0.4)],
+            0.001,
+            0.15,
+            now,
+        );
+        assert_eq!(keep, SwitchCost::default());
+        // Selling 30k of EQ: the old lot (tax-free) goes first.
+        let lighter = switch_cost(
+            &book(),
+            &[holding("EQ", 0.3), holding("BD", 0.7)],
+            0.001,
+            0.15,
+            now,
+        );
+        assert!((lighter.turnover_czk - 60_000.0).abs() < 1e-6);
+        assert!(lighter.taxable_gain_czk.abs() < 1e-6, "{lighter:?}");
+        assert!((lighter.fraction - 0.0006).abs() < 1e-9);
+        // Selling all of EQ reaches the young lot: 300 × (100 − 80) taxable.
+        let out = switch_cost(
+            &book(),
+            &[holding("BD", 0.5), holding("GD", 0.5)],
+            0.001,
+            0.15,
+            now,
+        );
+        assert!((out.taxable_gain_czk - 6_000.0).abs() < 1e-6, "{out:?}");
+        assert!((out.tax_czk - 900.0).abs() < 1e-6);
+        assert!(
+            (out.turnover_czk - 120_000.0).abs() < 1e-6,
+            "sells EQ, buys GD, adds to BD"
+        );
+    }
+
+    #[test]
+    fn a_proposal_is_scored_after_its_cost_against_the_book_unchanged() {
+        let series: BTreeMap<InstrumentId, Series> = [("EQ", 100.0, 120.0), ("BD", 100.0, 100.0)]
+            .into_iter()
+            .map(|(t, a, b)| {
+                let bar = |ts, close| Bar {
+                    ts,
+                    open: close,
+                    high: close,
+                    low: close,
+                    close,
+                    volume: 1.0,
+                };
+                (
+                    id(t),
+                    Series::new(id(t), vec![bar(at(2026, 1, 1), a), bar(at(2026, 4, 1), b)]),
+                )
+            })
+            .collect();
+        let book = [holding("EQ", 0.5), holding("BD", 0.5)];
+        let more_eq = [holding("EQ", 1.0)];
+        let s = score(
+            &more_eq,
+            0.01,
+            &book,
+            &series,
+            at(2026, 1, 2),
+            at(2026, 4, 2),
+        )
+        .expect("prices");
+        assert!((s.unchanged - 1.10).abs() < 1e-12);
+        assert!((s.proposal - 1.188).abs() < 1e-12, "1.2 after a 1% cost");
+        assert!(s.edge() > 0.0);
+        assert!(
+            score(
+                &[holding("XX", 1.0)],
+                0.0,
+                &book,
+                &series,
+                at(2026, 1, 2),
+                at(2026, 4, 2)
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn reviews_and_decisions_are_journaled_and_reviews_fall_due() {
+        let dir = std::env::temp_dir().join(format!("quorum-review-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let journal = ReviewJournal::new(&dir);
+        assert!(due(&journal.reviews(), "s1", at(2026, 1, 1), 91));
+        let record = ReviewRecord {
+            id: "r1".to_owned(),
+            ts: at(2026, 1, 1),
+            session: "s1".to_owned(),
+            model: "m".to_owned(),
+            version: "v".to_owned(),
+            summary: "fine".to_owned(),
+            observations: Vec::new(),
+            book: vec![holding("EQ", 1.0)],
+            proposals: vec![Costed {
+                proposal: Proposal {
+                    title: "t".to_owned(),
+                    rationale: "r".to_owned(),
+                    targets: vec![holding("BD", 1.0)],
+                },
+                cost: SwitchCost::default(),
+            }],
+            input_tokens: 1,
+            output_tokens: 1,
+        };
+        journal.add_review(&record).expect("written");
+        assert_eq!(journal.reviews(), vec![record]);
+        assert!(!due(&journal.reviews(), "s1", at(2026, 3, 1), 91));
+        assert!(due(&journal.reviews(), "s1", at(2026, 4, 2), 91));
+        assert!(
+            due(&journal.reviews(), "s2", at(2026, 3, 1), 91),
+            "per session"
+        );
+        let decision = |proposal| Decision {
+            review: "r1".to_owned(),
+            proposal,
+            accepted: false,
+            ts: at(2026, 1, 2),
+            note: None,
+        };
+        journal.decide(&decision(0)).expect("known proposal");
+        assert!(journal.decide(&decision(1)).is_err(), "no such proposal");
+        assert_eq!(journal.decisions().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

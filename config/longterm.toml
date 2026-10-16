@@ -12,6 +12,19 @@ fx_cost = 0.0015        # one CZK ↔ USD conversion at a retail broker
 fee_rate = 0.0005       # commission per trade
 slippage_bps = 2.0
 
+# The paper book (`quorum longterm paper`, every 6 hours under launchd) runs the FIRST policy below
+# from the day it starts: paper money, contributions on the first trading day of each month.
+# Changing that policy later needs `quorum longterm paper --fresh` (a new session).
+
+# The AI review of the paper book (DESIGN §20): it only proposes new target weights; each is
+# costed (trading + tax on lots under three years), journaled, decided by you
+# (`quorum longterm reviews`, `decide`) and scored against keeping the book unchanged.
+[review]
+enabled = true
+model = "claude-opus-5-5"   # one call a quarter: cents
+effort = "high"
+every_days = 91
+
 [[policies]]
 name = "balanced (example)"
 start_czk = 100000      # invested at the start

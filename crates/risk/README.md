@@ -34,6 +34,12 @@ the operator pulls the kill switch through it.
    the instrument (60-quote return correlation ≥ 0.7, itself included) ≤ `cluster_max`, both as
    fractions of equity (envelope, optional).
 
+The **long-term book** asks as the book `longterm` (`quorum_envelope::LONGTERM_BOOK`; no slot may
+take the name). It is bounded by the envelope's `[longterm]` section instead: its `max_mode` and
+`position_max`, no `cluster_max` (correlated funds are the operator's policy) and **no loss
+halts** (it rides out drawdowns by design). The kill switch still applies; without a
+`[longterm]` section it adds no risk at all.
+
 Every order and ping carries the slot's equity. The process measures the **daily loss** against
 the last equity it saw before the UTC day began (halt until the next day) and the **total
 drawdown** against the highest equity seen (halt until the operator resumes). `resume` restarts

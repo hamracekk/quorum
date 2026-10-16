@@ -9,7 +9,9 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Datelike, Months, NaiveDate, TimeZone, Utc};
 use quorum_core::metrics::Performance;
 use quorum_core::risk::RiskLimits;
-use quorum_core::{BacktestConfig, Bar, Engine, EquityPoint, Event, InstrumentId, Series, Side};
+use quorum_core::{
+    BacktestConfig, Bar, Engine, EquityPoint, Event, Fill, InstrumentId, Series, Side,
+};
 use serde::Serialize;
 
 use crate::LongTermError;
@@ -63,6 +65,7 @@ fn month_start(ts: DateTime<Utc>) -> DateTime<Utc> {
 }
 
 /// Contributions and the unit value of the book while it runs.
+#[derive(Debug, Clone, Default)]
 struct Flows {
     cash: Vec<(DateTime<Utc>, f64)>,
     contributed: f64,
@@ -70,34 +73,29 @@ struct Flows {
     nav: Vec<EquityPoint>,
 }
 
-/// The policy's instruments, its start and its bars in order.
-type Timeline<'a> = (
-    Vec<InstrumentId>,
-    DateTime<Utc>,
-    Vec<(&'a InstrumentId, &'a Bar)>,
-);
-
-/// The policy's instruments, the first date every holding and a rate exist, and every bar from
-/// then on in time order (holdings in policy order within a date).
+/// The policy's bars in time order (holdings in policy order within a date), from the first
+/// date every holding and a rate exist and not before `from`.
 fn timeline<'a>(
     policy: &Policy,
     series: &'a [Series],
     rates: &BTreeMap<NaiveDate, f64>,
-) -> Result<Timeline<'a>, LongTermError> {
-    let instruments: Vec<InstrumentId> = policy
+    from: Option<DateTime<Utc>>,
+) -> Result<Vec<(&'a InstrumentId, &'a Bar)>, LongTermError> {
+    let held: Vec<&Series> = policy
         .holdings
         .iter()
-        .map(|h| h.instrument.clone())
-        .collect();
-    let held: Vec<&Series> = instruments
-        .iter()
-        .map(|id| {
-            series.iter().find(|s| &s.instrument == id).ok_or_else(|| {
-                LongTermError::Data(format!("{}: no stored bars for {id}", policy.name))
-            })
+        .map(|h| {
+            series
+                .iter()
+                .find(|s| s.instrument == h.instrument)
+                .ok_or_else(|| {
+                    LongTermError::Data(format!(
+                        "{}: no stored bars for {}",
+                        policy.name, h.instrument
+                    ))
+                })
         })
         .collect::<Result<_, _>>()?;
-    // From the first date every holding and a rate exist.
     let start = held
         .iter()
         .filter_map(|s| s.bars.first().map(|b| b.ts))
@@ -107,6 +105,7 @@ fn timeline<'a>(
                 .next()
                 .map(|d| d.and_time(chrono::NaiveTime::MIN).and_utc()),
         )
+        .chain(from)
         .max()
         .ok_or_else(|| LongTermError::Data("no data".to_owned()))?;
     let mut bars: Vec<(usize, &InstrumentId, &Bar)> = held
@@ -120,11 +119,179 @@ fn timeline<'a>(
         })
         .collect();
     bars.sort_by_key(|(rank, _, b)| (b.ts, *rank));
-    Ok((
-        instruments,
-        start,
-        bars.into_iter().map(|(_, id, bar)| (id, bar)).collect(),
-    ))
+    Ok(bars.into_iter().map(|(_, id, bar)| (id, bar)).collect())
+}
+
+/// What driving a policy through its bars produced.
+#[derive(Debug, Clone)]
+pub struct Driven {
+    pub ledger: Ledger,
+    /// Every fill, in order.
+    pub fills: Vec<Fill>,
+    /// The first and the last timestamp processed; `None` before the first bar.
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    /// Latest close of each holding (USD).
+    pub last_close: BTreeMap<InstrumentId, f64>,
+    /// CZK per USD at `to`.
+    pub rate: f64,
+    flows: Flows,
+}
+
+impl Driven {
+    /// Paid in so far, in CZK.
+    #[must_use]
+    pub const fn contributed_czk(&self) -> f64 {
+        self.flows.contributed
+    }
+}
+
+/// The policy's instruments, in policy order.
+#[must_use]
+pub fn instruments(policy: &Policy) -> Vec<InstrumentId> {
+    policy
+        .holdings
+        .iter()
+        .map(|h| h.instrument.clone())
+        .collect()
+}
+
+/// The engine settings a policy runs with: no cash until the first contribution, and no daily
+/// kill switch (that is for trading; a long-term book rides out a bad day).
+#[must_use]
+pub fn engine_config(fee_rate: f64, slippage_bps: f64) -> BacktestConfig {
+    BacktestConfig {
+        initial_cash: 0.0,
+        fee_rate,
+        slippage_bps,
+        risk: RiskLimits {
+            max_daily_loss: 1.0,
+            ..RiskLimits::default()
+        },
+        ..BacktestConfig::default()
+    }
+}
+
+/// Feeds `policy`'s bars from `from` on through `engine`, with its contributions.
+///
+/// The engine is built on a [`PolicyStrategy`] with [`engine_config`]. The start amount goes in
+/// on the first timestamp and a contribution on the first of every later month (CZK at the ČNB
+/// rate, less the conversion cost); fills are booked as lots.
+pub fn drive(
+    engine: &mut Engine<'_>,
+    policy: &Policy,
+    series: &[Series],
+    rates: &BTreeMap<NaiveDate, f64>,
+    fx_cost: f64,
+    from: Option<DateTime<Utc>>,
+) -> Result<Driven, LongTermError> {
+    let bars = timeline(policy, series, rates, from)?;
+    let mut d = Driven {
+        ledger: Ledger::default(),
+        fills: Vec::new(),
+        from: None,
+        to: None,
+        last_close: BTreeMap::new(),
+        rate: rates.values().next_back().copied().unwrap_or(0.0),
+        flows: Flows::default(),
+    };
+    let mut next_contribution: Option<DateTime<Utc>> = None;
+    let mut value = 0.0;
+    for (instrument, bar) in bars {
+        let Some(rate) = rate_at(rates, bar.ts) else {
+            continue; // before the first rate: timeline() starts after it
+        };
+        if d.to.is_none_or(|c| bar.ts > c) {
+            if let Some(c) = d.to {
+                // The timestamp before this one is complete: value the book.
+                value = engine.snapshot().equity * d.rate;
+                d.flows.nav.push(EquityPoint {
+                    ts: c,
+                    equity: value / d.flows.units,
+                });
+            }
+            let amount = match next_contribution {
+                None => Some(policy.start_czk),
+                Some(due) if bar.ts >= due => Some(policy.monthly_czk),
+                Some(_) => None,
+            };
+            if let Some(amount) = amount.filter(|a| *a > 0.0) {
+                let nav = if d.flows.units > 0.0 {
+                    (value / d.flows.units).max(f64::MIN_POSITIVE)
+                } else {
+                    1.0
+                };
+                d.flows.units += amount / nav;
+                engine.deposit(amount / rate * (1.0 - fx_cost));
+                d.flows.cash.push((bar.ts, -amount));
+                d.flows.contributed += amount;
+                value += amount;
+            }
+            let mut due = next_contribution.unwrap_or_else(|| month_start(bar.ts));
+            while due <= bar.ts {
+                due = due + Months::new(1);
+            }
+            next_contribution = Some(due);
+            d.from.get_or_insert(bar.ts);
+            d.to = Some(bar.ts);
+            d.rate = rate;
+        }
+        d.last_close.insert(instrument.clone(), bar.close);
+        let events = engine
+            .on_bar(instrument, bar)
+            .map_err(|e| LongTermError::Data(e.to_string()))?;
+        for event in events {
+            if let Event::Fill(fill) = event {
+                d.ledger
+                    .apply(&fill, rate_at(rates, fill.ts).unwrap_or(rate));
+                d.fills.push(fill);
+            }
+        }
+    }
+    Ok(d)
+}
+
+/// The report on a driven policy whose book is worth `equity_usd` now.
+#[must_use]
+pub fn report(policy: &Policy, d: &Driven, equity_usd: f64, costs: SimCosts) -> SimReport {
+    let end = d.to.unwrap_or_else(Utc::now);
+    let value_czk = equity_usd * d.rate * (1.0 - costs.fx_cost);
+    let mut nav = d.flows.nav.clone();
+    if d.flows.units > 0.0 {
+        nav.push(EquityPoint {
+            ts: end,
+            equity: value_czk / d.flows.units,
+        });
+    }
+    let tax_paid: f64 = d.ledger.tax_by_year(costs.tax_rate).values().sum();
+    let if_sold = d.ledger.if_sold(&d.last_close, d.rate, end);
+    let after_sale = if_sold
+        .taxable_gain
+        .max(0.0)
+        .mul_add(-costs.tax_rate, value_czk - tax_paid);
+    let mut pre = d.flows.cash.clone();
+    pre.push((end, value_czk - tax_paid));
+    let mut post = d.flows.cash.clone();
+    post.push((end, after_sale));
+    let unit = nav.first().map_or_else(Performance::default, |p| {
+        Performance::from_curve(p.equity, &nav)
+    });
+    SimReport {
+        policy: policy.name.clone(),
+        from: d.from,
+        to: d.to,
+        contributed_czk: d.flows.contributed,
+        value_czk,
+        tax_paid_czk: tax_paid,
+        if_sold,
+        after_sale_tax_czk: after_sale,
+        money_weighted: xirr(&pre),
+        money_weighted_after_tax: xirr(&post),
+        time_weighted: unit.cagr,
+        max_drawdown: unit.max_drawdown,
+        trades: d.fills.len(),
+        sells: d.fills.iter().filter(|f| f.side == Side::Sell).count(),
+    }
 }
 
 /// Runs `policy` over `series` (USD prices) with `rates` (CZK per USD).
@@ -134,109 +301,18 @@ pub fn simulate(
     rates: &BTreeMap<NaiveDate, f64>,
     costs: SimCosts,
 ) -> Result<SimReport, LongTermError> {
-    let (instruments, start, bars) = timeline(policy, series, rates)?;
-    let first_rate = rate_at(rates, start)
-        .ok_or_else(|| LongTermError::Data("no exchange rate at the start".to_owned()))?;
-
-    let cfg = BacktestConfig {
-        initial_cash: policy.start_czk / first_rate * (1.0 - costs.fx_cost),
-        fee_rate: costs.fee_rate,
-        slippage_bps: costs.slippage_bps,
-        risk: RiskLimits {
-            // A long-term book rides out a bad day; the daily kill switch is for trading.
-            max_daily_loss: 1.0,
-            ..RiskLimits::default()
-        },
-        ..BacktestConfig::default()
-    };
-    let mut strategy = PolicyStrategy::new(policy.clone());
-    let mut engine = Engine::new(&mut strategy, cfg, &instruments, None);
-
-    let mut ledger = Ledger::default();
-    let mut f = Flows {
-        cash: vec![(start, -policy.start_czk)],
-        contributed: policy.start_czk,
-        units: policy.start_czk,
-        nav: Vec::new(),
-    };
-    let mut next_contribution = month_start(start) + Months::new(1);
-    let mut value = policy.start_czk;
-    let mut current: Option<DateTime<Utc>> = None;
-    let (mut trades, mut sells) = (0, 0);
-    let mut last_close: BTreeMap<InstrumentId, f64> = BTreeMap::new();
-
-    for (instrument, bar) in bars {
-        let rate = rate_at(rates, bar.ts).unwrap_or(first_rate);
-        if current.is_none_or(|c| bar.ts > c) {
-            if let Some(c) = current {
-                // The timestamp before this one is complete: value the book.
-                value = engine.snapshot().equity * rate;
-                f.nav.push(EquityPoint {
-                    ts: c,
-                    equity: value / f.units,
-                });
-            }
-            if bar.ts >= next_contribution && policy.monthly_czk > 0.0 {
-                let nav = (value / f.units).max(f64::MIN_POSITIVE);
-                f.units += policy.monthly_czk / nav;
-                engine.deposit(policy.monthly_czk / rate * (1.0 - costs.fx_cost));
-                f.cash.push((bar.ts, -policy.monthly_czk));
-                f.contributed += policy.monthly_czk;
-                value += policy.monthly_czk;
-                while next_contribution <= bar.ts {
-                    next_contribution = next_contribution + Months::new(1);
-                }
-            }
-            current = Some(bar.ts);
-        }
-        last_close.insert(instrument.clone(), bar.close);
-        let events = engine
-            .on_bar(instrument, bar)
-            .map_err(|e| LongTermError::Data(e.to_string()))?;
-        for event in &events {
-            if let Event::Fill(fill) = event {
-                ledger.apply(fill, rate_at(rates, fill.ts).unwrap_or(rate));
-                trades += 1;
-                sells += usize::from(fill.side == Side::Sell);
-            }
-        }
+    if rates.is_empty() {
+        return Err(LongTermError::Data("no exchange rates".to_owned()));
     }
-    let end = current.unwrap_or(start);
-    let end_rate = rate_at(rates, end).unwrap_or(first_rate);
-    let value_czk = engine.snapshot().equity * end_rate * (1.0 - costs.fx_cost);
-    f.nav.push(EquityPoint {
-        ts: end,
-        equity: value_czk / f.units,
-    });
-    let tax_paid: f64 = ledger.tax_by_year(costs.tax_rate).values().sum();
-    let if_sold = ledger.if_sold(&last_close, end_rate, end);
-    let after_sale = if_sold
-        .taxable_gain
-        .max(0.0)
-        .mul_add(-costs.tax_rate, value_czk - tax_paid);
-    let mut pre = f.cash.clone();
-    pre.push((end, value_czk - tax_paid));
-    let mut post = f.cash;
-    post.push((end, after_sale));
-    let unit = f.nav.first().map_or_else(Performance::default, |p| {
-        Performance::from_curve(p.equity, &f.nav)
-    });
-    Ok(SimReport {
-        policy: policy.name.clone(),
-        from: Some(start),
-        to: current,
-        contributed_czk: f.contributed,
-        value_czk,
-        tax_paid_czk: tax_paid,
-        if_sold,
-        after_sale_tax_czk: after_sale,
-        money_weighted: xirr(&pre),
-        money_weighted_after_tax: xirr(&post),
-        time_weighted: unit.cagr,
-        max_drawdown: unit.max_drawdown,
-        trades,
-        sells,
-    })
+    let mut strategy = PolicyStrategy::new(policy.clone());
+    let mut engine = Engine::new(
+        &mut strategy,
+        engine_config(costs.fee_rate, costs.slippage_bps),
+        &instruments(policy),
+        None,
+    );
+    let driven = drive(&mut engine, policy, series, rates, costs.fx_cost, None)?;
+    Ok(report(policy, &driven, engine.snapshot().equity, costs))
 }
 
 /// The annual rate that makes the cash flows' present value zero (bisection); 0 when none.

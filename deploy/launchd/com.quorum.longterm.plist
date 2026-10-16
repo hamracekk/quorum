@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The long-term book on paper under launchd (macOS): `quorum longterm paper` at login and every
+     6 hours. Each run replays the book, invests new closes and contributions through the risk
+     process, and asks for the AI review when one is due; then it exits. A missed run only delays
+     the next close's orders. install-longterm.sh replaces __REPO__ and __LOGS__. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.quorum.longterm</string>
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/target/release/quorum</string>
+    <string>longterm</string>
+    <string>paper</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>RUST_LOG</key>
+    <string>info</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>21600</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__LOGS__/longterm.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOGS__/longterm.log</string>
+</dict>
+</plist>

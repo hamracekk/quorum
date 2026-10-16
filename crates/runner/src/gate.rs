@@ -18,11 +18,11 @@ use crate::{Result, RunnerError};
 
 /// One verdict, as recorded in `verdicts.jsonl`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct Recorded {
+pub(crate) struct Recorded {
     session: String,
     order: u64,
     ts: DateTime<Utc>,
-    approved: bool,
+    pub(crate) approved: bool,
     reason: String,
 }
 
@@ -58,6 +58,29 @@ pub(crate) struct GatedBroker {
     interval_secs: i64,
 }
 
+/// Whose orders the gate checks and where their verdicts are kept.
+#[derive(Debug, Clone)]
+pub(crate) struct GateSession {
+    /// The slot's id, or the long-term book's name.
+    pub(crate) book: String,
+    pub(crate) session: String,
+    /// Orders at or before this time with no recorded verdict were sent before the gate.
+    pub(crate) replay_until: Option<DateTime<Utc>>,
+    /// `verdicts.jsonl`.
+    pub(crate) log: PathBuf,
+}
+
+impl GateSession {
+    pub(crate) fn slot(session: &Session, files: &SlotFiles) -> Self {
+        Self {
+            book: session.slot.as_str().to_owned(),
+            session: session.id.clone(),
+            replay_until: session.journaled_until,
+            log: files.verdicts(),
+        }
+    }
+}
+
 /// What the gate tells the risk process about the slot besides its orders.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GateBook {
@@ -74,20 +97,18 @@ impl GatedBroker {
     pub(crate) fn new(
         inner: Box<dyn Broker>,
         gate: Arc<dyn RiskGate>,
-        session: &Session,
+        session: GateSession,
         book: GateBook,
-        files: &SlotFiles,
     ) -> Result<Self> {
-        let log = files.verdicts();
         Ok(Self {
             inner,
             gate,
-            slot: session.slot.as_str().to_owned(),
+            slot: session.book,
             mode: book.mode,
-            session: session.id.clone(),
-            replay_until: session.journaled_until,
-            recorded: load(&log, &session.id)?,
-            log,
+            recorded: load(&session.log, &session.session)?,
+            session: session.session,
+            replay_until: session.replay_until,
+            log: session.log,
             cash: book.capital,
             positions: BTreeMap::new(),
             marks: BTreeMap::new(),
@@ -242,6 +263,11 @@ impl Broker for GatedBroker {
         self.inner.liquidity(instrument, dollar_volume);
     }
 
+    fn deposit(&mut self, amount: f64) {
+        self.cash += amount;
+        self.inner.deposit(amount);
+    }
+
     fn spread(&mut self, instrument: &InstrumentId, half_spread: f64) {
         self.inner.spread(instrument, half_spread);
     }
@@ -276,7 +302,7 @@ impl Broker for GatedBroker {
 }
 
 /// The session's recorded verdicts. A torn last line (a crash mid-write) is skipped.
-fn load(path: &Path, session: &str) -> Result<BTreeMap<u64, Recorded>> {
+pub(crate) fn load(path: &Path, session: &str) -> Result<BTreeMap<u64, Recorded>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),

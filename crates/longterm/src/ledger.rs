@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 use chrono::{DateTime, Datelike, Months, Utc};
 use quorum_core::{Fill, InstrumentId, Side};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Years a lot must be held to be tax-free.
 pub const TIME_TEST_YEARS: u32 = 3;
@@ -141,7 +141,7 @@ impl Ledger {
 }
 
 /// What selling the whole book now would mean for tax.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 /// All amounts in CZK.
 pub struct IfSold {
     pub taxable_gain: f64,

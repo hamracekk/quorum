@@ -22,6 +22,11 @@ impl SlotId {
             && id
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if id == quorum_envelope::LONGTERM_BOOK {
+            return Err(SlotConfigError::Invalid(format!(
+                "slot id `{id}` is the long-term book's"
+            )));
+        }
         if valid {
             Ok(Self(id))
         } else {

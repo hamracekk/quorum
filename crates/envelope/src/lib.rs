@@ -92,6 +92,22 @@ pub struct LossLimits {
     pub total_max: f64,
 }
 
+/// The long-term book's name wherever slots are named (risk requests, halts): no slot may take it.
+pub const LONGTERM_BOOK: &str = "longterm";
+
+/// Bounds for the long-term book (DESIGN §20): apart from the slots, with no loss halts (it rides
+/// out drawdowns by design; the operator's kill switch still applies).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LongTermBounds {
+    /// Most capital the book may hold, in the envelope's currency.
+    pub capital_max: f64,
+    /// Highest rung the book may reach.
+    pub max_mode: Mode,
+    /// Most one holding may be worth, as a fraction of the book's equity.
+    pub position_max: f64,
+}
+
 /// Bounds for one slot.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -117,6 +133,8 @@ struct Raw {
     position_max: Option<f64>,
     #[serde(default)]
     cluster_max: Option<f64>,
+    #[serde(default)]
+    longterm: Option<LongTermBounds>,
 }
 
 /// The operator's envelope. Build it with [`Envelope::load`] or [`Envelope::parse`].
@@ -131,6 +149,7 @@ pub struct Envelope {
     slots: BTreeMap<String, SlotBounds>,
     position_max: Option<f64>,
     cluster_max: Option<f64>,
+    longterm: Option<LongTermBounds>,
 }
 
 impl Envelope {
@@ -156,6 +175,7 @@ impl Envelope {
             slots: raw.slots,
             position_max: raw.position_max,
             cluster_max: raw.cluster_max,
+            longterm: raw.longterm,
         };
         envelope.validate()?;
         Ok(envelope)
@@ -192,8 +212,35 @@ impl Envelope {
         if self.loss.daily_max > self.loss.total_max {
             return invalid("loss.daily_max exceeds loss.total_max".to_owned());
         }
-        let named = self.slots.iter().map(|(name, b)| (name.as_str(), b));
-        for (name, bounds) in std::iter::once(("slot_default", &self.slot_default)).chain(named) {
+        if self.slots.contains_key(LONGTERM_BOOK) {
+            return invalid(format!(
+                "`{LONGTERM_BOOK}` is the long-term book: bound it in [longterm], not [slots]"
+            ));
+        }
+        if let Some(lt) = self.longterm
+            && !(lt.position_max.is_finite()
+                && lt.position_max > 0.0
+                && lt.position_max <= self.leverage_max)
+        {
+            return invalid(format!(
+                "longterm.position_max {} must be in (0, leverage_max]",
+                lt.position_max
+            ));
+        }
+        let named = self.slots.iter().map(|(name, b)| (name.as_str(), *b));
+        let longterm = self.longterm.map(|lt| {
+            (
+                LONGTERM_BOOK,
+                SlotBounds {
+                    capital_max: lt.capital_max,
+                    max_mode: lt.max_mode,
+                },
+            )
+        });
+        for (name, bounds) in std::iter::once(("slot_default", self.slot_default))
+            .chain(named)
+            .chain(longterm)
+        {
             if !bounds.capital_max.is_finite() || bounds.capital_max < 0.0 {
                 return invalid(format!("{name}: capital_max must be ≥ 0"));
             }
@@ -265,12 +312,19 @@ impl Envelope {
         self.slot(slot).max_mode
     }
 
-    /// No slot can reach a live mode.
+    /// The long-term book's bounds; `None`: the envelope does not allow one.
+    #[must_use]
+    pub const fn longterm(&self) -> Option<LongTermBounds> {
+        self.longterm
+    }
+
+    /// Neither a slot nor the long-term book can reach a live mode.
     #[must_use]
     pub fn is_paper_only(&self) -> bool {
         std::iter::once(&self.slot_default)
             .chain(self.slots.values())
             .all(|b| !b.max_mode.is_live())
+            && self.longterm.is_none_or(|lt| !lt.max_mode.is_live())
     }
 }
 
