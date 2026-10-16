@@ -210,6 +210,9 @@ pub struct Sizing {
 #[serde(default, deny_unknown_fields)]
 pub struct Brakes {
     pub vol_regime: Option<VolRegimeBrake>,
+    /// No new entries while the market is in crisis (`core::strategies::CrisisGate`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub crisis_entries: bool,
 }
 
 /// Scales every target down while the market is unusually volatile.
