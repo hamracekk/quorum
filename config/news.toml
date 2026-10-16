@@ -1,0 +1,91 @@
+# The knowledge plane (DESIGN §8): news → typed events, read by two Claude tiers. News is
+# untrusted data: model output is validated against a closed schema and never reaches an order.
+# The Anthropic key lives in the keychain: `quorum secrets set anthropic`.
+
+poll_minutes = 30             # `quorum news run` fetches and reads this often
+slots = ["crypto-spot", "multi-asset"]   # read news for these slots' instruments
+batch = 25                    # items read per tier per run
+
+# First-pass readings at/above this magnitude go to the escalation tier: low|medium|high|all|never.
+escalate = "medium"
+
+# Every new item, cheaply (DESIGN §8: a fast model triages everything).
+[first_pass]
+enabled = true
+model = "claude-haiku-5-5"    # $0.10 / $0.50 per million tokens
+effort = "low"
+fallbacks = false             # Claude Haiku 5.5 has no server-side refusal fallback
+daily_tokens = 1000000        # ≈ $0.10–0.50 a day at most
+
+# Items the first pass reads as mattering, with a stronger model.
+[escalation]
+enabled = true
+model = "claude-sonnet-5-5"   # $2 / $10 per million tokens (operator choice, 2026-10-16)
+effort = "low"                # low effort keeps a simple extraction cheap
+fallbacks = true              # a declined request re-runs server-side on Anthropic's fallback
+daily_tokens = 200000         # ≈ $0.50–2 a day at most
+
+# Words that tag an item with an asset, besides its ticker (whole words, any case).
+[aliases]
+SPY = ["S&P 500", "Wall Street"]
+QQQ = ["Nasdaq"]
+IWM = ["Russell 2000", "small caps"]
+EFA = ["developed markets"]
+EEM = ["emerging markets"]
+EWJ = ["Japan", "Nikkei"]
+EWG = ["Germany", "DAX"]
+FXI = ["China"]
+XLE = ["energy stocks"]
+TLT = ["Treasury", "Treasuries", "bond yields"]
+IEF = ["Treasury", "Treasuries"]
+SHY = ["Treasury bills"]
+LQD = ["corporate bonds", "investment grade"]
+HYG = ["high yield", "junk bonds"]
+TIP = ["inflation", "TIPS"]
+EMB = ["emerging market debt"]
+GLD = ["gold"]
+SLV = ["silver"]
+USO = ["oil", "crude", "OPEC", "Brent", "WTI"]
+DBC = ["commodities"]
+DBA = ["wheat", "corn", "soybeans", "agriculture"]
+VNQ = ["real estate", "REIT", "REITs"]
+UUP = ["dollar", "DXY"]
+FXE = ["euro", "ECB"]
+FXY = ["yen", "Bank of Japan", "BOJ"]
+
+# Feeds: crypto, central banks, energy, markets. Public, keyless; a failing one never stops others.
+[[source]]
+name = "coindesk"
+url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+
+[[source]]
+name = "cointelegraph"
+url = "https://cointelegraph.com/rss"
+
+[[source]]
+name = "decrypt"
+url = "https://decrypt.co/feed"
+
+[[source]]
+name = "theblock"
+url = "https://www.theblock.co/rss.xml"
+
+[[source]]
+name = "federal-reserve"
+url = "https://www.federalreserve.gov/feeds/press_all.xml"
+
+[[source]]
+name = "ecb"
+url = "https://www.ecb.europa.eu/rss/press.html"
+
+[[source]]
+name = "eia-energy"
+url = "https://www.eia.gov/rss/todayinenergy.xml"
+
+[[source]]
+name = "marketwatch"
+url = "https://feeds.content.dowjones.io/public/rss/mw_topstories"
+
+[[source]]
+name = "cnbc-markets"
+url = "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258"

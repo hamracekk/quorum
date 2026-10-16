@@ -15,8 +15,10 @@ pub(crate) const TIINGO: &str = "tiingo";
 pub(crate) const NTFY_TOPIC: &str = "ntfy-topic";
 /// Optional access token for a protected or self-hosted ntfy server.
 pub(crate) const NTFY_TOKEN: &str = "ntfy-token";
+/// Anthropic API key: the knowledge plane's Claude tiers (news → typed events).
+pub(crate) const ANTHROPIC: &str = "anthropic";
 /// Every secret `quorum secrets` manages.
-pub(crate) const KNOWN: [&str; 3] = [TIINGO, NTFY_TOPIC, NTFY_TOKEN];
+pub(crate) const KNOWN: [&str; 4] = [TIINGO, NTFY_TOPIC, NTFY_TOKEN, ANTHROPIC];
 
 /// The secret for `account`, if stored.
 pub(crate) fn get(account: &str) -> Option<String> {

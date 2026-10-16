@@ -30,6 +30,7 @@ evidence; a separate **risk process** enforces the **envelope** the operator set
 | `runner` | Paper-trades one slot: history sync, resume by replay, journal watermark, live bars, gap backfill | new (port of trader's paper daemon) |
 | `recorder` | Forward recorder: liquidations, book depth, derivatives snapshots to daily JSONL, gaps marked | new |
 | `notify` | Operator notifications: ntfy phone alerts, log, best-effort fan-out | new (port of trader's phone alerts) |
+| `knowledge` | Knowledge plane: news fetch and tagging, tiered Claude extraction, impact-map themes, budgets | new (port of trader's M5 orchestration) |
 | `cli` | The `quorum` binary and composition root | new |
 
 trader's `service`, `mcp`, `agents`, `server`, `cli`, `app` and dashboard were **not** copied:
@@ -45,6 +46,8 @@ allocator (DESIGN §16).
 | `config/slots/multi-asset.toml` | Research slot: 25 US ETFs across asset classes (Tiingo; cannot paper-trade) |
 | `config/recorder.toml` | What the forward recorder records and how often |
 | `config/notify.toml` | Phone alerts (ntfy): on/off, server, minimum severity; the topic is in the keychain |
+| `config/news.toml` | News feeds (crypto, central banks, energy, markets), slots to read for, Claude tiers and daily budgets |
+| `config/impact.toml` | The operator's impact map: themes and the instruments each moves, across markets |
 
 ## Research
 
@@ -81,6 +84,7 @@ Unattended on the laptop (launchd: start at login, restart on failure, logs): se
 ./deploy/launchd/install.sh crypto-spot     # paper-trade crypto-spot
 ./deploy/launchd/install-recorder.sh        # forward recorder (`quorum record`)
 ./deploy/launchd/install-watchdog.sh        # health check every 5 min → alerts
+./deploy/launchd/install-news.sh            # news service: fetch + read with Claude every 30 min
 ```
 
 ## Gates

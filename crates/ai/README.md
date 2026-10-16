@@ -24,7 +24,7 @@ contract. Orchestration (tiers, budget, cache, storage) lives in the service lay
 - **Model choice is the operator's.** `[ai.remote] model` defaults to `claude-opus-5-5`; switching
   to a cheaper model is a config decision. Forced `tool_choice` returns 400 on current models, so
   JSON comes from structured outputs.
-- **Keys** come from the OS keychain (`trader secrets set anthropic`), never from config files.
+- **Keys** come from the OS keychain (`quorum secrets set anthropic`), never from config files.
 
 ## Testing
 

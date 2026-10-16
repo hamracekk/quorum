@@ -41,6 +41,17 @@ records the time. Read-only: it never starts, stops or trades anything.
 ./deploy/launchd/uninstall-watchdog.sh
 ```
 
+### The news service
+
+`com.quorum.news` runs `quorum news run`: every `poll_minutes` it fetches the feeds in
+`config/news.toml` and reads new items with the Claude tiers, within their daily budgets. Logs:
+`~/Library/Logs/quorum/news.log`. Without an Anthropic key it still collects news and reads none.
+
+```bash
+./deploy/launchd/install-news.sh
+./deploy/launchd/uninstall-news.sh          # stored news and readings stay in the journal
+```
+
 ### The forward recorder
 
 `com.quorum.recorder` runs `quorum record` (`config/recorder.toml`) the same way: started at

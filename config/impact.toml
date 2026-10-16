@@ -1,0 +1,83 @@
+# The impact map (DESIGN §8, trader ADR 0008): themes news can be about and what each moves,
+# written and versioned by the operator. Models classify items into these themes; they never add
+# or change a link. Each link is a hypothesis with its own record from `since`: it earns weight
+# only if the moves it implies come true out of sample. `sign`: 1 moves with the theme, -1 against.
+
+[[themes]]
+id = "us-rates"
+description = "US interest rates or rate expectations (Fed decisions, inflation surprises); up = higher rates"
+links = [
+  { instrument = "tiingo:TLT:equity", sign = -1, since = "2026-10-16", why = "Long bond prices fall as yields rise" },
+  { instrument = "tiingo:IEF:equity", sign = -1, since = "2026-10-16", why = "Mid-term bond prices fall as yields rise" },
+  { instrument = "tiingo:QQQ:equity", sign = -1, since = "2026-10-16", why = "Growth stocks are rate-sensitive" },
+  { instrument = "tiingo:SPY:equity", sign = -1, since = "2026-10-16", why = "Higher discount rates for all equities" },
+  { instrument = "tiingo:UUP:equity", sign = 1, since = "2026-10-16", why = "Higher US rates attract capital into dollars" },
+  { instrument = "tiingo:GLD:equity", sign = -1, since = "2026-10-16", why = "Gold pays no yield; dearer money weighs on it" },
+  { instrument = "binance:BTCUSDT", sign = -1, since = "2026-10-16", why = "Higher rates make risk assets less attractive" },
+]
+
+[[themes]]
+id = "euro-rates"
+description = "Euro-area interest rates or ECB policy expectations; up = higher rates"
+links = [
+  { instrument = "tiingo:FXE:equity", sign = 1, since = "2026-10-16", why = "Higher euro rates attract capital into the euro" },
+  { instrument = "tiingo:EWG:equity", sign = -1, since = "2026-10-16", why = "Tighter money weighs on European equities" },
+]
+
+[[themes]]
+id = "oil-prices"
+description = "Crude oil prices or supply (OPEC decisions, supply shocks, sanctions, inventories); up = dearer oil"
+links = [
+  { instrument = "tiingo:USO:equity", sign = 1, since = "2026-10-16", why = "Tracks crude oil futures" },
+  { instrument = "tiingo:XLE:equity", sign = 1, since = "2026-10-16", why = "Energy producers earn more on dearer oil" },
+  { instrument = "tiingo:DBC:equity", sign = 1, since = "2026-10-16", why = "Energy is the largest part of broad commodity indices" },
+  { instrument = "tiingo:QQQ:equity", sign = -1, since = "2026-10-16", why = "Inflation and rate fears weigh on growth stocks" },
+  { instrument = "tiingo:SPY:equity", sign = -1, since = "2026-10-16", why = "Higher input costs squeeze most companies' margins" },
+  { instrument = "binance:BTCUSDT", sign = -1, since = "2026-10-16", why = "Hypothesis: an oil shock is risk-off and lifts rate expectations" },
+]
+
+[[themes]]
+id = "spot-crypto-etf"
+description = "Spot crypto ETF approvals, launches or net inflows; up = more inflows"
+links = [
+  { instrument = "binance:BTCUSDT", sign = 1, since = "2026-10-16", why = "New buyers through brokerage accounts" },
+  { instrument = "binance:ETHUSDT", sign = 1, since = "2026-10-16", why = "Same channel, second-largest coin" },
+  { instrument = "binance:SOLUSDT", sign = 1, since = "2026-10-16", why = "Next in line for spot ETFs" },
+]
+
+[[themes]]
+id = "crypto-hack"
+description = "Hacks, exploits or thefts at crypto exchanges or protocols; up = more or larger hacks"
+links = [
+  { instrument = "binance:BTCUSDT", sign = -1, since = "2026-10-16", why = "Risk-off across crypto and forced selling of stolen funds" },
+  { instrument = "binance:ETHUSDT", sign = -1, since = "2026-10-16", why = "Most exploited protocols run on Ethereum" },
+]
+
+[[themes]]
+id = "crypto-regulation"
+description = "Stricter crypto regulation or enforcement (bans, lawsuits, new restrictions); down = easing"
+links = [
+  { instrument = "binance:BTCUSDT", sign = -1, since = "2026-10-16", why = "Harder access and legal risk lower demand" },
+  { instrument = "binance:ETHUSDT", sign = -1, since = "2026-10-16", why = "Same channel; securities questions hit tokens harder" },
+]
+
+[[themes]]
+id = "risk-off"
+description = "A broad flight from risk (market crash, banking stress, war or geopolitical shock); up = more fear"
+links = [
+  { instrument = "tiingo:SPY:equity", sign = -1, since = "2026-10-16", why = "Equities sell off in a flight from risk" },
+  { instrument = "tiingo:HYG:equity", sign = -1, since = "2026-10-16", why = "Credit spreads widen" },
+  { instrument = "tiingo:TLT:equity", sign = 1, since = "2026-10-16", why = "Safe-haven demand for Treasuries" },
+  { instrument = "tiingo:GLD:equity", sign = 1, since = "2026-10-16", why = "Safe-haven demand for gold" },
+  { instrument = "tiingo:FXY:equity", sign = 1, since = "2026-10-16", why = "The yen strengthens as carry trades unwind" },
+  { instrument = "binance:BTCUSDT", sign = -1, since = "2026-10-16", why = "Crypto trades as a risk asset in stress" },
+]
+
+[[themes]]
+id = "china-stimulus"
+description = "Chinese economic stimulus or easing (rate cuts, fiscal support); down = tightening"
+links = [
+  { instrument = "tiingo:FXI:equity", sign = 1, since = "2026-10-16", why = "Chinese equities benefit directly" },
+  { instrument = "tiingo:EEM:equity", sign = 1, since = "2026-10-16", why = "China is the largest emerging market" },
+  { instrument = "tiingo:DBC:equity", sign = 1, since = "2026-10-16", why = "China is the largest buyer of commodities" },
+]

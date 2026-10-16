@@ -37,6 +37,10 @@ change when its module map, invariants or extension steps change.
 - **Factors are point in time and studied before use.** A factor's value at bar `t` uses bars
   up to `t` only; `lab::factors::study` judges it out-of-sample after costs, with the direction
   fixed in-sample, before anything may weigh it.
+- **News is data, never an action.** Feed text reaches a model only as inert data; answers are
+  validated against a closed schema (`quorum_ai`) or rejected whole; readings are journaled for
+  scoring and never place or size an order. The impact map is operator-written; models never add
+  links. Bump `PROMPT_VERSION` / `THEMES_VERSION` when a prompt or schema changes.
 - **Regime rules are fixed in advance.** Thresholds in `core::regime::RegimeRule::default` are
   not tuned per market or to results; changing them is a new hypothesis, studied again.
 - **Everything earns its weight.** Factors, strategies, prompts, models and slots start at zero
@@ -67,6 +71,8 @@ cargo run --release -p quorum-cli -- record   # forward recorder (config/recorde
 ./deploy/launchd/install-recorder.sh        # the recorder under launchd
 cargo run --release -p quorum-cli -- notify --test   # phone alert test (ntfy; topic in the keychain)
 ./deploy/launchd/install-watchdog.sh        # watchdog: paper heartbeat + recorder, every 5 min
+cargo run --release -p quorum-cli -- news fetch | extract | list | status   # knowledge plane
+./deploy/launchd/install-news.sh            # news service (`quorum news run`)
 cargo run --release -p quorum-cli -- research sync --slot crypto-spot   # long history → data/research/bars
 cargo run --release -p quorum-cli -- factors --slot crypto-spot   # factor study (IC, OOS, after costs)
 cargo run --release -p quorum-cli -- secrets status   # which API keys are in the keychain (never printed)
