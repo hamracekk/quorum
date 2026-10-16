@@ -22,6 +22,7 @@ use quorum_recorder::{Feeds, RecordStore, RecorderConfig, record};
 use quorum_runner::{Ports, RunOptions, SlotFiles, request_stop, run};
 use quorum_slots::{SlotConfig, SlotId};
 
+mod benchmark;
 mod evaluate;
 mod news;
 mod risk;
@@ -342,6 +343,7 @@ async fn ports(slot: &SlotConfig, config: &Path, data: &Path) -> Result<Ports> {
         risk: Arc::new(quorum_risk::SocketGate::new(
             risk::paths(config, data).socket(),
         )),
+        benchmark: benchmark::paper_benchmark(config),
     })
 }
 
@@ -1038,6 +1040,9 @@ fn allocate(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
             "allocation-no-limit"
         };
         println!("report: {}", save_report(data, name, &report)?.display());
+        if daily_limit {
+            benchmark::compare_variants(config, data, &report.variants)?;
+        }
     }
     Ok(())
 }

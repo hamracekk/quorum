@@ -1,0 +1,27 @@
+# Passive alternatives quorum must beat after costs (DESIGN §11). If the book cannot beat these,
+# the better answer is to hold them. Operator-written; `quorum allocate` compares every variant
+# against each, and the daily paper summary reports `summary` over the session.
+#
+# Priced from the research slot's stored bars (Tiingo adjusted closes: dividends included).
+# US-listed ETFs stand in for their UCITS equivalents (an EU investor would hold e.g. a world
+# equity or S&P 500 UCITS fund), which track the same indices. Before tax: in CZ a passive fund
+# held over 3 years is tax-free, quorum's trading is not.
+
+slot = "multi-asset"
+summary = "60/40"
+
+[[portfolios]]
+name = "US equity"
+holdings = [{ instrument = "tiingo:SPY:equity", weight = 1.0 }]
+
+[[portfolios]]
+name = "60/40"
+rebalance_days = 21
+holdings = [
+  { instrument = "tiingo:SPY:equity", weight = 0.6 },
+  { instrument = "tiingo:TLT:equity", weight = 0.4 },
+]
+
+[[portfolios]]
+name = "cash (short Treasuries)"
+holdings = [{ instrument = "tiingo:SHY:equity", weight = 1.0 }]

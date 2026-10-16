@@ -7,7 +7,7 @@ trader's paper daemon, scoped to a slot and its envelope.
 
 | File | What it holds |
 |---|---|
-| `lib.rs` | `Ports` (market data, stream, bar store, journal, event log, notifier, risk gate), `RunnerError` |
+| `lib.rs` | `Ports` (market data, stream, bar store, journal, event log, notifier, risk gate, optional passive benchmark for the daily summary), `RunnerError` |
 | `build.rs` | `strategy` (slot strategy → per-holding vol sizing → optional top-volume universe → optional book vol target), `backtest_config` (slot costs, brakes, exits + the envelope's daily loss), `interval_duration` |
 | `session.rs` | `SlotFiles` (`<data>/slots/<id>/`), `Session`, `StateFile`, `request_stop` |
 | `gate.rs` | `GatedBroker`: every order goes to the risk process first; verdicts recorded per session in `verdicts.jsonl` so replay repeats them |

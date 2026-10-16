@@ -45,7 +45,8 @@ pub use order::{ExecutionReport, Order, OrderBook, OrderError, OrderId, OrderSta
 pub use ports::{
     AgentCall, AgentStore, BarStore, ChatModel, Decision, EventLog, Journal, LlmProvider,
     LlmRequest, LlmResponse, MarketData, MarketStream, NewsSource, NewsStore, Notification,
-    Notifier, PortError, PredictionSource, RunInfo, RunKind, Severity, StreamedBar, TraderSource,
+    Notifier, PassiveBenchmark, PortError, PredictionSource, RunInfo, RunKind, Severity,
+    StreamedBar, TraderSource,
 };
 pub use strategy::{ExternalCall, Strategy};
 pub use types::{Bar, EquityPoint, Fill, Series, Side};

@@ -58,6 +58,9 @@ pub struct Variant {
     pub later: Performance,
     /// Average weight per slot (cash is the rest).
     pub avg_weights: Vec<(String, f64)>,
+    /// The variant's equity curve, for comparisons (not in the report).
+    #[serde(skip)]
+    pub curve: Vec<EquityPoint>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,6 +100,7 @@ fn variant(
             .iter()
             .map(|s| (s.name.clone(), s.avg_weight))
             .collect(),
+        curve: combined.curve.clone(),
     };
     (variant, combined.correlation)
 }

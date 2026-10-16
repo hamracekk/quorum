@@ -6,6 +6,7 @@
 //! judged only on the following window, which they have never seen.
 
 pub mod allocation;
+pub mod benchmark;
 pub mod carry;
 mod error;
 pub mod factors;

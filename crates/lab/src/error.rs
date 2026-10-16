@@ -6,4 +6,6 @@ pub enum LabError {
     EmptyWindow,
     #[error("not enough data: need at least {needed} bars, have {available}")]
     NotEnoughData { needed: usize, available: usize },
+    #[error("benchmark: {0}")]
+    Benchmark(String),
 }

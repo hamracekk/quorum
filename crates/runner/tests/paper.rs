@@ -6,7 +6,8 @@ use std::time::Duration as StdDuration;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use quorum_core::fakes::{
-    MemoryBarStore, MemoryEventLog, MemoryMarketData, MemoryMarketStream, MemoryNotifier,
+    FixedBenchmark, MemoryBarStore, MemoryEventLog, MemoryMarketData, MemoryMarketStream,
+    MemoryNotifier,
 };
 use quorum_core::{Bar, EventLog, InstrumentId, Journal, VenueId};
 use quorum_envelope::Envelope;
@@ -108,6 +109,10 @@ impl World {
             log: self.log.clone(),
             notifier: self.notes.clone(),
             risk: self.risk.clone(),
+            benchmark: Some(Arc::new(FixedBenchmark {
+                name: "60/40".to_owned(),
+                growth: Some(0.0123),
+            })),
         }
     }
 
@@ -504,6 +509,12 @@ async fn the_operator_hears_of_the_start_each_day_and_the_end() {
     assert!(
         notes.iter().any(|n| n.body.contains("since start")),
         "summaries carry the equity change"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.body.contains("since start, 60/40 +1.23%)")),
+        "and what the passive benchmark made over the session"
     );
     let last = notes.last().expect("end");
     assert_eq!(last.title, "paper crypto-spot · session stream-ended");

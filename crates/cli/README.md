@@ -14,7 +14,7 @@ quorum record                                   # forward recorder (config/recor
 quorum research sync --slot multi-asset --days 7500   # research history → data/research/bars
 quorum factors --slot multi-asset --horizon 5   # factor study → data/factors/
 quorum backtest --slot crypto-spot --daily-loss 0.05   # slot strategy over research history: CAGR, Sharpe, DD, halts
-quorum allocate                                 # walk-forward slots, study allocating across them
+quorum allocate                                 # walk-forward slots, study allocating across them, compare with config/benchmark.toml
 quorum stress                                   # stress gate per slot and for the book → data/reports/
 quorum secrets set tiingo | ntfy-topic | status   # secrets in the macOS keychain (service quorum)
 quorum notify --test                            # phone alert test through ntfy

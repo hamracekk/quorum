@@ -359,6 +359,28 @@ impl LlmProvider for MemoryLlm {
     }
 }
 
+/// A benchmark whose growth over any period is fixed.
+#[derive(Debug, Clone)]
+pub struct FixedBenchmark {
+    pub name: String,
+    pub growth: Option<f64>,
+}
+
+#[async_trait]
+impl crate::ports::PassiveBenchmark for FixedBenchmark {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn growth(
+        &self,
+        _from: DateTime<Utc>,
+        _to: DateTime<Utc>,
+    ) -> Result<Option<f64>, PortError> {
+        Ok(self.growth)
+    }
+}
+
 /// Records every notification it is given.
 #[derive(Debug, Default)]
 pub struct MemoryNotifier {
