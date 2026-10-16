@@ -580,3 +580,15 @@ set capital and loss limits (§5.1 shows example values).
 
 Several factors have to agree before a trade happens. The repo is `quorum`, binaries
 `quorum` / `quorum-risk` / `quorum-mcp`, and crates are prefixed `quorum-`.
+
+---
+
+## 20. Long-term book (planned, 2026-10-16)
+
+A buy-and-hold part of quorum, **separate from the trading slots**: its own envelope section and
+capital (never shared with or moved by the allocator), its own broker account or DIP so tax lots
+and 3-year clocks stay apart, operator-written policy (target weights, allowed UCITS funds by
+ISIN, rebalance bands), rules for contributions and band rebalancing that prefer tax-free lots,
+and a quarterly **AI review** of the holdings that only proposes changes (with their tax cost),
+is journaled and scored against "keep the policy unchanged". The risk process still approves every
+order. Evidence, Czech tax notes and the full sketch: [docs/long-term-investing.md](docs/long-term-investing.md).
