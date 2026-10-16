@@ -98,4 +98,5 @@ cargo run --release -p quorum-cli -- backtest --slot crypto-spot --daily-loss of
 cargo run --release -p quorum-cli -- allocate   # walk-forward each slot, study allocating across them
 cargo run --release -p quorum-cli -- stress     # stress gate: crises and synthetic shocks per slot and book
 cargo run --release -p quorum-cli -- evaluate --slot crypto-spot [--source paper]   # trade evaluator (shadow)
+cargo run --release -p quorum-cli -- longterm backtest   # long-term book: policies in CZK, contributions, tax lots
 ```

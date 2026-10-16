@@ -24,6 +24,7 @@ use quorum_slots::{SlotConfig, SlotId};
 
 mod benchmark;
 mod evaluate;
+mod longterm;
 mod news;
 mod risk;
 mod secrets;
@@ -63,6 +64,11 @@ enum Command {
         /// Bars between rebalance dates and the forward window.
         #[arg(long, default_value_t = 7)]
         horizon: usize,
+    },
+    /// The long-term book (DESIGN §20): buy-and-hold policies in CZK, apart from the slots.
+    Longterm {
+        #[command(subcommand)]
+        command: longterm::LongTermCommand,
     },
     /// Trade evaluator in shadow: a case file for every entry the slot's strategy proposes,
     /// labelled taken or not, and whether anything in them tells winners from losers out of
@@ -257,6 +263,9 @@ async fn main() -> Result<ExitCode> {
         Command::Regime { slot, horizon } => {
             regime(&cli.config, &cli.data, &slot, horizon).map(|()| ExitCode::SUCCESS)
         }
+        Command::Longterm { command } => longterm::run(&cli.config, &cli.data, command)
+            .await
+            .map(|()| ExitCode::SUCCESS),
         Command::Evaluate { slot, source } => evaluate::run(&cli.config, &cli.data, &slot, source)
             .await
             .map(|()| ExitCode::SUCCESS),

@@ -140,7 +140,7 @@ fn print_rows(title: &str, rows: &[quorum_lab::benchmark::Comparison]) {
 
 /// CZK per USD at ČNB fixings from `first_year` on, cached in `data/research/fx/CZK-USD.json`
 /// and refreshed when the cache is more than a few days old.
-async fn czk_per_usd(
+pub(crate) async fn czk_per_usd(
     data: &Path,
     first_year: i32,
 ) -> Result<std::collections::BTreeMap<chrono::NaiveDate, f64>> {

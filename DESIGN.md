@@ -585,7 +585,7 @@ Several factors have to agree before a trade happens. The repo is `quorum`, bina
 
 ---
 
-## 20. Long-term book (planned, 2026-10-16)
+## 20. Long-term book (foundation built 2026-10-16)
 
 A buy-and-hold part of quorum, **separate from the trading slots**: its own envelope section and
 capital (never shared with or moved by the allocator), its own broker account or DIP so tax lots
@@ -594,6 +594,13 @@ ISIN, rebalance bands), rules for contributions and band rebalancing that prefer
 and a quarterly **AI review** of the holdings that only proposes changes (with their tax cost),
 is journaled and scored against "keep the policy unchanged". The risk process still approves every
 order. Evidence, Czech tax notes and the full sketch: [docs/long-term-investing.md](docs/long-term-investing.md).
+
+**Built:** `crates/longterm` and `quorum longterm backtest` (`config/longterm.toml`): policies run on
+the one engine (`Engine::deposit`, `Strategy::on_book`), contributions buy the most underweight
+holdings, a band breach rebalances, fills become CZK tax lots (FIFO, three-year test). 2006–2026
+with 100k CZK + 5k a month (example policies, US ETFs as UCITS stand-ins): world equity 11.1%/yr
+money-weighted (drawdown 55%), balanced 60/30/10 8.9% (33%), 60/40 8.0% (35%); almost no tax,
+as lots outlive the time test. Next: paper running, IBKR UCITS prices, the AI review.
 
 ---
 

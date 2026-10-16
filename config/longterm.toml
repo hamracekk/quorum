@@ -1,0 +1,49 @@
+# The long-term book (DESIGN §20): buy-and-hold investing, separate from the trading slots.
+# Operator-written. The first policy is yours; the others are alternatives it is compared with
+# by `quorum longterm backtest`.
+#
+# EXAMPLE VALUES, not advice: replace the weights and amounts with your own decision. US-listed
+# ETFs stand in for the UCITS funds an EU investor would hold (same indices) until IBKR supplies
+# those prices: SPY/EFA/EEM ≈ an all-world fund (e.g. VWCE), IEF ≈ intermediate government bonds
+# (e.g. EUR-hedged AGGH), GLD ≈ physical gold (e.g. SGLN).
+
+prices_from = "multi-asset"
+fx_cost = 0.0015        # one CZK ↔ USD conversion at a retail broker
+fee_rate = 0.0005       # commission per trade
+slippage_bps = 2.0
+
+[[policies]]
+name = "balanced (example)"
+start_czk = 100000      # invested at the start
+monthly_czk = 5000      # added every month
+band = 0.05             # rebalance when a holding is 5 points off its target
+holdings = [
+  { instrument = "tiingo:SPY:equity", weight = 0.38 },
+  { instrument = "tiingo:EFA:equity", weight = 0.16 },
+  { instrument = "tiingo:EEM:equity", weight = 0.06 },
+  { instrument = "tiingo:IEF:equity", weight = 0.30 },
+  { instrument = "tiingo:GLD:equity", weight = 0.10 },
+]
+
+[[policies]]
+name = "world equity only"
+start_czk = 100000
+monthly_czk = 5000
+band = 0.05
+holdings = [
+  { instrument = "tiingo:SPY:equity", weight = 0.64 },
+  { instrument = "tiingo:EFA:equity", weight = 0.26 },
+  { instrument = "tiingo:EEM:equity", weight = 0.10 },
+]
+
+[[policies]]
+name = "60/40 world"
+start_czk = 100000
+monthly_czk = 5000
+band = 0.05
+holdings = [
+  { instrument = "tiingo:SPY:equity", weight = 0.38 },
+  { instrument = "tiingo:EFA:equity", weight = 0.16 },
+  { instrument = "tiingo:EEM:equity", weight = 0.06 },
+  { instrument = "tiingo:IEF:equity", weight = 0.40 },
+]

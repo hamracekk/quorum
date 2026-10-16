@@ -232,6 +232,13 @@ impl Portfolio {
         self.cash
     }
 
+    /// Adds `amount` of cash (a contribution); a negative amount withdraws.
+    pub fn deposit(&mut self, amount: f64) {
+        if amount.is_finite() {
+            self.cash += amount;
+        }
+    }
+
     pub fn position(&self, instrument: &InstrumentId) -> f64 {
         self.positions.get(instrument).copied().unwrap_or(0.0)
     }

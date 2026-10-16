@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'longterm'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'quorum-longterm'
+  description: 'Long-term book: policy, contributions, band rebalancing, CZK tax lots (DESIGN §20)'
+dependsOn:
+  - 'core'
