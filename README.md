@@ -8,6 +8,7 @@ evidence; a separate **risk process** enforces the **envelope** the operator set
 > **Status:** P0 Foundation in progress. Paper only (§19.2 of the design). Not financial advice.
 
 - Design, principles and phases: [DESIGN.md](DESIGN.md)
+- Long-term investing (evidence, Czech tax notes, the planned separate long-term book): [docs/long-term-investing.md](docs/long-term-investing.md)
 - Successor to [trader](../trader) (`hamracekk/llm-trader`): its proven crates were copied here
   with their git history (DESIGN §19.4).
 
