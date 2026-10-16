@@ -20,10 +20,10 @@ daily_tokens = 1000000        # ≈ $0.10–0.50 a day at most
 # Items the first pass reads as mattering, with the strongest model.
 [escalation]
 enabled = true
-model = "claude-opus-5-5"     # $4 / $20 per million tokens; a cheaper model is your call
-effort = "low"                # thinking stays on (Opus 5.5); low effort keeps it cheap
+model = "claude-sonnet-5-5"   # $2 / $10 per million tokens (operator choice, 2026-10-16)
+effort = "low"                # low effort keeps a simple extraction cheap
 fallbacks = true              # a declined request re-runs server-side on Anthropic's fallback
-daily_tokens = 200000         # ≈ $1–4 a day at most
+daily_tokens = 200000         # ≈ $0.50–2 a day at most
 
 # Words that tag an item with an asset, besides its ticker (whole words, any case).
 [aliases]
