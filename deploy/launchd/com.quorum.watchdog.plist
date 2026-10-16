@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The watchdog under launchd (macOS): one health check every 5 minutes and at login. It alerts
+     (config/notify.toml) when a paper session stops heartbeating or fails, or the recorder goes
+     stale — once when it breaks, once when it recovers. Read-only: it never starts, stops or
+     trades anything. install-watchdog.sh replaces __REPO__, __LOGS__ and __SLOTS__. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.quorum.watchdog</string>
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/target/release/quorum</string>
+    <string>watchdog</string>
+    <string>--slots</string>
+    <string>__SLOTS__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>RUST_LOG</key>
+    <string>info</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__LOGS__/watchdog.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOGS__/watchdog.log</string>
+</dict>
+</plist>

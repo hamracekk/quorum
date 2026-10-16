@@ -10,6 +10,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use quorum_bus::JsonlEventLog;
 use quorum_core::BarStore as _;
+use quorum_core::Notifier as _;
 use quorum_data::ParquetStore;
 use quorum_data::binance::BinanceSpot;
 use quorum_data::binance_futures::BinanceFutures;
@@ -90,6 +91,18 @@ enum Command {
     Stress {
         /// Comma-separated slot ids.
         #[arg(long, value_delimiter = ',', default_value = "crypto-spot,multi-asset")]
+        slots: Vec<String>,
+    },
+    /// Send a test notification through every enabled channel.
+    Notify {
+        #[arg(long)]
+        test: bool,
+    },
+    /// One health check (run by launchd every 5 minutes): paper heartbeats and the recorder.
+    /// Alerts once when something breaks and once when it recovers.
+    Watchdog {
+        /// Comma-separated slot ids to watch.
+        #[arg(long, value_delimiter = ',', default_value = "crypto-spot")]
         slots: Vec<String>,
     },
     /// Research data, kept apart from what paper sessions replay.
@@ -200,6 +213,12 @@ async fn main() -> Result<ExitCode> {
         Command::Backtest { slot, daily_loss } => {
             backtest(&cli.config, &cli.data, &slot, &daily_loss).map(|()| ExitCode::SUCCESS)
         }
+        Command::Notify { test } => notify_test(&cli.config, test)
+            .await
+            .map(|()| ExitCode::SUCCESS),
+        Command::Watchdog { slots } => watchdog(&cli.config, &cli.data, &slots)
+            .await
+            .map(|()| ExitCode::SUCCESS),
         Command::Stress { slots } => {
             stress(&cli.config, &cli.data, &slots).map(|()| ExitCode::SUCCESS)
         }
@@ -255,8 +274,22 @@ fn load(config: &Path, slot: &str) -> Result<(SlotConfig, Envelope)> {
     Ok((slot, envelope))
 }
 
+/// The operator's notifier: the log always, ntfy phone alerts when `config/notify.toml` enables
+/// them. Best effort: a failing channel is logged, never fails a run.
+fn notifier(config: &Path) -> Result<Arc<dyn quorum_core::Notifier>> {
+    let cfg = quorum_notify::NotifyConfig::load(&config.join("notify.toml")).context("notify")?;
+    let mut channels: Vec<Arc<dyn quorum_core::Notifier>> =
+        vec![Arc::new(quorum_notify::LogNotifier)];
+    if cfg.phone.enabled {
+        channels.push(Arc::new(
+            quorum_notify::PhoneNotifier::from_secrets(&cfg.phone, secrets::get).context("ntfy")?,
+        ));
+    }
+    Ok(Arc::new(quorum_notify::Fanout::new(channels)))
+}
+
 /// The adapters for the slot's venue.
-async fn ports(slot: &SlotConfig, data: &Path) -> Result<Ports> {
+async fn ports(slot: &SlotConfig, config: &Path, data: &Path) -> Result<Ports> {
     if slot.venue.as_str() != "binance" {
         bail!(
             "no adapters for venue `{}` yet (binance only)",
@@ -274,12 +307,13 @@ async fn ports(slot: &SlotConfig, data: &Path) -> Result<Ports> {
         bars: Arc::new(ParquetStore::new(data.join("bars"))),
         journal: Arc::new(journal),
         log: Arc::new(log),
+        notifier: notifier(config)?,
     })
 }
 
 async fn paper_run(config: &Path, data: &Path, slot: &str, fresh: bool) -> Result<ExitCode> {
     let (slot, envelope) = load(config, slot)?;
-    let ports = ports(&slot, data).await?;
+    let ports = ports(&slot, config, data).await?;
     let options = RunOptions {
         fresh,
         ..RunOptions::new(data.to_path_buf())
@@ -624,6 +658,98 @@ fn slot_stream(
         curve: report.curve,
         regime_exposure,
     })
+}
+
+async fn notify_test(config: &Path, test: bool) -> Result<()> {
+    let cfg = quorum_notify::NotifyConfig::load(&config.join("notify.toml")).context("notify")?;
+    println!(
+        "phone (ntfy): {} · topic {}",
+        if cfg.phone.enabled {
+            "enabled"
+        } else {
+            "disabled in config/notify.toml"
+        },
+        if secrets::get(secrets::NTFY_TOPIC).is_some() {
+            "set"
+        } else {
+            "missing: quorum secrets set ntfy-topic"
+        }
+    );
+    if !test {
+        return Ok(());
+    }
+    let n = quorum_core::Notification {
+        ts: chrono::Utc::now(),
+        severity: quorum_core::Severity::Warning,
+        title: "quorum · test alert".into(),
+        body: "if this reached your phone, alerts work".into(),
+    };
+    // Sent through the phone channel directly, so a failure is shown rather than only logged.
+    if cfg.phone.enabled {
+        quorum_notify::PhoneNotifier::from_secrets(&cfg.phone, secrets::get)?
+            .notify(&n)
+            .await
+            .context("ntfy")?;
+        println!("sent: check the ntfy app");
+    }
+    Ok(())
+}
+
+/// The newest modification time of any file under `dir` (one level of subdirectories).
+fn last_write(dir: &Path) -> Option<chrono::DateTime<chrono::Utc>> {
+    let mut newest: Option<std::time::SystemTime> = None;
+    for feed in std::fs::read_dir(dir).ok()?.flatten() {
+        for file in std::fs::read_dir(feed.path())
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            if let Ok(modified) = file.metadata().and_then(|m| m.modified()) {
+                newest = newest.max(Some(modified));
+            }
+        }
+    }
+    newest.map(chrono::DateTime::<chrono::Utc>::from)
+}
+
+async fn watchdog(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
+    use quorum_runner::watchdog::{Observation, WatchState, evaluate};
+
+    let mut seen = Vec::new();
+    for id in slots {
+        let files = SlotFiles::new(data, &slot_id(id)?);
+        let state = files.load_state()?.map(|s| (s.status, s.heartbeat));
+        seen.push((id.clone(), state));
+    }
+    let observation = Observation {
+        now: chrono::Utc::now(),
+        slots: seen,
+        recorder_last_write: last_write(&data.join("recorder")),
+    };
+    let path = data.join("watchdog.json");
+    let before: WatchState = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default(); // first run, or an unreadable file: start clean
+    let (alerts, after) = evaluate(&observation, &before);
+    let notifier = notifier(config)?;
+    for a in &alerts {
+        let n = quorum_core::Notification {
+            ts: observation.now,
+            severity: a.severity,
+            title: a.title.clone(),
+            body: a.body.clone(),
+        };
+        notifier.notify(&n).await.ok(); // best effort: the fan-out already logged a failure
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&after)?)
+        .with_context(|| format!("{}", path.display()))?;
+    println!(
+        "{} open incidents, {} alerts sent",
+        after.open.len(),
+        alerts.len()
+    );
+    Ok(())
 }
 
 /// A slot's strategy and buy & hold curves over `series`.

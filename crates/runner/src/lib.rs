@@ -12,10 +12,11 @@
 mod build;
 mod paper;
 mod session;
+pub mod watchdog;
 
 use std::sync::Arc;
 
-use quorum_core::{BarStore, EventLog, Journal, MarketData, MarketStream};
+use quorum_core::{BarStore, EventLog, Journal, MarketData, MarketStream, Notifier};
 
 pub use build::{backtest_config, interval_duration, strategy};
 pub use paper::{Outcome, RunOptions, Status, run};
@@ -29,6 +30,8 @@ pub struct Ports {
     pub bars: Arc<dyn BarStore>,
     pub journal: Arc<dyn Journal>,
     pub log: Arc<dyn EventLog>,
+    /// Alerts and daily summaries to the operator (best effort: never fails a run).
+    pub notifier: Arc<dyn Notifier>,
 }
 
 #[derive(Debug, thiserror::Error)]

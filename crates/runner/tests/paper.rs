@@ -5,7 +5,9 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use quorum_core::fakes::{MemoryBarStore, MemoryEventLog, MemoryMarketData, MemoryMarketStream};
+use quorum_core::fakes::{
+    MemoryBarStore, MemoryEventLog, MemoryMarketData, MemoryMarketStream, MemoryNotifier,
+};
 use quorum_core::{Bar, EventLog, InstrumentId, Journal, VenueId};
 use quorum_envelope::Envelope;
 use quorum_journal::SqliteJournal;
@@ -72,6 +74,7 @@ struct World {
     store: Arc<MemoryBarStore>,
     journal: Arc<SqliteJournal>,
     log: Arc<MemoryEventLog>,
+    notes: Arc<MemoryNotifier>,
 }
 
 impl World {
@@ -84,6 +87,7 @@ impl World {
             store: Arc::new(MemoryBarStore::default()),
             journal: Arc::new(SqliteJournal::in_memory().await.expect("journal")),
             log: Arc::new(MemoryEventLog::default()),
+            notes: Arc::new(MemoryNotifier::default()),
         }
     }
 
@@ -99,6 +103,7 @@ impl World {
             bars: self.store.clone(),
             journal: self.journal.clone(),
             log: self.log.clone(),
+            notifier: self.notes.clone(),
         }
     }
 
@@ -465,4 +470,56 @@ async fn a_second_process_cannot_run_the_same_slot() {
 fn only_an_ended_stream_asks_for_a_restart() {
     assert!(Status::StreamEnded.restart());
     assert!(!Status::Stopped.restart());
+}
+
+#[tokio::test]
+async fn the_operator_hears_of_the_start_each_day_and_the_end() {
+    let w = World::new("notes").await;
+    let now = day(30) + Duration::minutes(5);
+    run(
+        &w.ports(30, live(30..33)),
+        &slot(),
+        &envelope(),
+        &w.options(now),
+        std::future::pending(),
+    )
+    .await
+    .expect("run");
+    let notes = w.notes.sent();
+    let titles: Vec<&str> = notes.iter().map(|n| n.title.as_str()).collect();
+    assert_eq!(
+        titles.first(),
+        Some(&"paper crypto-spot · session started"),
+        "{titles:?}"
+    );
+    let days = titles.iter().filter(|t| t.contains("· day 2026-")).count();
+    assert_eq!(
+        days, 3,
+        "one summary per completed day (30, 31, 32): {titles:?}"
+    );
+    assert!(
+        notes.iter().any(|n| n.body.contains("since start")),
+        "summaries carry the equity change"
+    );
+    let last = notes.last().expect("end");
+    assert_eq!(last.title, "paper crypto-spot · session stream-ended");
+    assert_eq!(last.severity, quorum_core::Severity::Warning);
+
+    // Resuming does not repeat a summary for a day already summarized.
+    run(
+        &w.ports(30, live(32..33)),
+        &slot(),
+        &envelope(),
+        &w.options(day(33)),
+        std::future::pending(),
+    )
+    .await
+    .expect("resumed");
+    let again = w.notes.sent();
+    let days_now = again
+        .iter()
+        .filter(|n| n.title.contains("· day 2026-"))
+        .count();
+    assert_eq!(days_now, 3, "day 32 is not summarized twice");
+    assert!(again.iter().any(|n| n.title.ends_with("session resumed")));
 }

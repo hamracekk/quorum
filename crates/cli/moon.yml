@@ -12,6 +12,7 @@ dependsOn:
   - 'data'
   - 'envelope'
   - 'journal'
+  - 'notify'
   - 'lab'
   - 'core'
   - 'recorder'

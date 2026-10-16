@@ -16,7 +16,9 @@ quorum factors --slot multi-asset --horizon 5   # factor study → data/factors/
 quorum backtest --slot crypto-spot --daily-loss 0.05   # slot strategy over research history: CAGR, Sharpe, DD, halts
 quorum allocate                                 # walk-forward slots, study allocating across them
 quorum stress                                   # stress gate per slot and for the book → data/reports/
-quorum secrets set tiingo | status              # API keys in the macOS keychain (service quorum)
+quorum secrets set tiingo | ntfy-topic | status   # secrets in the macOS keychain (service quorum)
+quorum notify --test                            # phone alert test through ntfy
+quorum watchdog --slots crypto-spot             # one health check (launchd runs it every 5 min)
 ```
 
 Exit codes of `paper run`: `0` after a requested stop (Ctrl+C, SIGTERM, `paper stop`), `75`
