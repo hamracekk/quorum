@@ -36,6 +36,8 @@ pub struct Ports {
     pub notifier: Arc<dyn Notifier>,
     /// The risk process, which approves every order (DESIGN §9).
     pub risk: Arc<dyn quorum_risk::RiskGate>,
+    /// The passive portfolio the daily summary compares the session with; none: no comparison.
+    pub benchmark: Option<Arc<dyn quorum_core::PassiveBenchmark>>,
 }
 
 #[derive(Debug, thiserror::Error)]

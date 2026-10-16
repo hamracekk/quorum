@@ -345,6 +345,26 @@ async fn load_history(
     Ok(series)
 }
 
+/// `, 60/40 +1.20%`: what the passive benchmark made from `from` to `to`, or nothing when there
+/// is none or its prices are not available (best effort).
+async fn passive(
+    benchmark: Option<Arc<dyn quorum_core::PassiveBenchmark>>,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> String {
+    let Some(benchmark) = benchmark else {
+        return String::new();
+    };
+    match benchmark.growth(from, to).await {
+        Ok(Some(growth)) => format!(", {} {:+.2}%", benchmark.name(), growth * 100.0),
+        Ok(None) => String::new(),
+        Err(err) => {
+            tracing::warn!(error = %err, "benchmark unavailable for the summary");
+            String::new()
+        }
+    }
+}
+
 /// A notification on its way out.
 struct Outgoing(Arc<dyn quorum_core::Notifier>, Notification);
 
@@ -428,6 +448,12 @@ impl Live<'_> {
         if !complete || !fresh || latest < self.session.trade_from {
             return;
         }
+        let passive = passive(
+            self.ports.benchmark.clone(),
+            self.session.trade_from,
+            latest + self.step,
+        )
+        .await;
         let snapshot = self.engine.snapshot();
         let capital = self.session.config.paper_capital;
         let before = self.session.summary_equity.unwrap_or(capital);
@@ -441,7 +467,7 @@ impl Live<'_> {
             Severity::Info,
             &format!("day {}", latest.date_naive()),
             &format!(
-                "equity {:.2} ({:+.2}% since the last summary, {:+.2}% since start) · {} positions, {:.0}% invested · {} fills{}",
+                "equity {:.2} ({:+.2}% since the last summary, {:+.2}% since start{passive}) · {} positions, {:.0}% invested · {} fills{}",
                 snapshot.equity,
                 ratio(snapshot.equity, before) * 100.0,
                 ratio(snapshot.equity, capital) * 100.0,

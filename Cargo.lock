@@ -1635,6 +1635,7 @@ name = "quorum-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "clap",
  "quorum-ai",
@@ -1774,6 +1775,7 @@ dependencies = [
  "quorum-core",
  "serde",
  "thiserror",
+ "toml",
 ]
 
 [[package]]

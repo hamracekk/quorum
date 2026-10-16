@@ -455,6 +455,22 @@ pub trait Notifier: Send + Sync + fmt::Debug {
     async fn notify(&self, notification: &Notification) -> Result<(), PortError>;
 }
 
+/// A passive portfolio (DESIGN §11), priced for comparisons: what the same money would have
+/// made by holding it.
+#[async_trait]
+pub trait PassiveBenchmark: Send + Sync + fmt::Debug {
+    /// The portfolio's name, e.g. `60/40`.
+    fn name(&self) -> &str;
+
+    /// Growth from the last close before `from` to the last close before `to` (0.012 = +1.2%);
+    /// `None` while no prices cover the period.
+    async fn growth(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Option<f64>, PortError>;
+}
+
 /// What produced a journaled run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
