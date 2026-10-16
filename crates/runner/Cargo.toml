@@ -17,6 +17,7 @@ quorum-bus.workspace = true
 quorum-data.workspace = true
 quorum-core.workspace = true
 quorum-envelope.workspace = true
+quorum-risk.workspace = true
 quorum-slots.workspace = true
 
 [dev-dependencies]

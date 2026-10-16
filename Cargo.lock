@@ -1648,6 +1648,7 @@ dependencies = [
  "quorum-news",
  "quorum-notify",
  "quorum-recorder",
+ "quorum-risk",
  "quorum-runner",
  "quorum-slots",
  "serde",
@@ -1835,6 +1836,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "quorum-risk"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "quorum-core",
+ "quorum-envelope",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "quorum-runner"
 version = "0.1.0"
 dependencies = [
@@ -1845,6 +1860,7 @@ dependencies = [
  "quorum-data",
  "quorum-envelope",
  "quorum-journal",
+ "quorum-risk",
  "quorum-slots",
  "serde",
  "serde_json",

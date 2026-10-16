@@ -22,6 +22,7 @@ quorum-data.workspace = true
 quorum-envelope.workspace = true
 quorum-journal.workspace = true
 quorum-knowledge.workspace = true
+quorum-risk.workspace = true
 quorum-news.workspace = true
 quorum-ai.workspace = true
 quorum-notify.workspace = true

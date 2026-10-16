@@ -1,0 +1,18 @@
+[package]
+name = "quorum-risk"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "io-util"] }
+tracing.workspace = true
+quorum-core.workspace = true
+quorum-envelope.workspace = true
+
+[lints]
+workspace = true

@@ -23,6 +23,7 @@ use quorum_runner::{Ports, RunOptions, SlotFiles, request_stop, run};
 use quorum_slots::{SlotConfig, SlotId};
 
 mod news;
+mod risk;
 mod secrets;
 
 #[derive(Debug, Parser)]
@@ -110,6 +111,11 @@ enum Command {
     News {
         #[command(subcommand)]
         command: news::NewsCommand,
+    },
+    /// The risk process, the only approver of orders, and its kill switch.
+    Risk {
+        #[command(subcommand)]
+        command: risk::RiskCommand,
     },
     /// Research data, kept apart from what paper sessions replay.
     Research {
@@ -222,6 +228,9 @@ async fn main() -> Result<ExitCode> {
         Command::News { command } => news::run(&cli.config, &cli.data, command, shutdown_signal())
             .await
             .map(|()| ExitCode::SUCCESS),
+        Command::Risk { command } => risk::run(&cli.config, &cli.data, command, shutdown_signal())
+            .await
+            .map(|()| ExitCode::SUCCESS),
         Command::Notify { test } => notify_test(&cli.config, test)
             .await
             .map(|()| ExitCode::SUCCESS),
@@ -317,6 +326,9 @@ async fn ports(slot: &SlotConfig, config: &Path, data: &Path) -> Result<Ports> {
         journal: Arc::new(journal),
         log: Arc::new(log),
         notifier: notifier(config)?,
+        risk: Arc::new(quorum_risk::SocketGate::new(
+            risk::paths(config, data).socket(),
+        )),
     })
 }
 

@@ -41,6 +41,21 @@ records the time. Read-only: it never starts, stops or trades anything.
 ./deploy/launchd/uninstall-watchdog.sh
 ```
 
+### The risk process
+
+`com.quorum.risk` runs `quorum risk run`, the only approver of orders (DESIGN §9). Paper slots
+ask it about every order over `data/risk/risk.sock`; **while it is down they refuse every order
+that adds risk** (risk-reducing orders still pass) and alert once. Install it before the slots.
+Its halts and loss references survive restarts in `data/risk/state.json`.
+
+```bash
+./deploy/launchd/install-risk.sh
+quorum risk status                          # kill switch, halts, equity seen, order counts
+quorum risk halt --reason "…"               # kill switch for every slot (or --slot crypto-spot)
+quorum risk resume                          # operator only: lift halts
+./deploy/launchd/uninstall-risk.sh
+```
+
 ### The news service
 
 `com.quorum.news` runs `quorum news run`: every `poll_minutes` it fetches the feeds in
