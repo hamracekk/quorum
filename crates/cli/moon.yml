@@ -15,6 +15,7 @@ dependsOn:
   - 'knowledge'
   - 'risk'
   - 'evaluator'
+  - 'longterm'
   - 'news'
   - 'ai'
   - 'notify'

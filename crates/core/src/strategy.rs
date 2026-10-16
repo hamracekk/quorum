@@ -22,6 +22,17 @@ pub struct ExternalCall {
     pub strength: f64,
 }
 
+/// The account as a strategy may see it at a close (for policies that rebalance a book rather
+/// than react to bars).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BookView {
+    pub ts: DateTime<Utc>,
+    pub equity: f64,
+    pub cash: f64,
+    /// Market value of each held instrument at the latest marks.
+    pub values: std::collections::BTreeMap<InstrumentId, f64>,
+}
+
 /// A trading strategy expressed as desired exposure per instrument.
 ///
 /// Strategies never place orders directly. On each *closed* bar of an instrument they
@@ -53,4 +64,15 @@ pub trait Strategy: fmt::Debug + Send {
     /// The instruments currently tradable (a point-in-time universe re-ranked them). Strategies
     /// that rank instruments against each other choose only among these; ignored by default.
     fn set_universe(&mut self, _members: &BTreeSet<InstrumentId>) {}
+
+    /// At each close, after the bars: targets set from the whole book (a policy that invests
+    /// contributions or rebalances on bands). Each target returned is re-applied to the actual
+    /// position, so only the difference trades; instruments left out keep their targets. `None`
+    /// (the default) leaves the targets from `on_bar` as they are.
+    fn on_book(
+        &mut self,
+        _book: &BookView,
+    ) -> Option<std::collections::BTreeMap<InstrumentId, f64>> {
+        None
+    }
 }

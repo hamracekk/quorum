@@ -6,8 +6,8 @@ use quorum_core::backtest::BacktestConfig;
 use quorum_core::risk::{PortfolioRisk, RiskLimits};
 use quorum_core::stops::StopRules;
 use quorum_core::strategies::{
-    PerInstrument, PortfolioVolRule, PortfolioVolTarget, TopVolume, TrendMomentum, VolTarget,
-    XsMomentum,
+    CrisisGate, PerInstrument, PortfolioVolRule, PortfolioVolTarget, TopVolume, TrendMomentum,
+    VolTarget, XsMomentum,
 };
 use quorum_envelope::Envelope;
 use quorum_slots::{SlotConfig, StrategySpec};
@@ -55,6 +55,11 @@ pub fn strategy(slot: &SlotConfig, instruments: usize) -> Result<Box<dyn Strateg
         Some(rule) => Box::new(TopVolume::new(inner, rule)),
         None => inner,
     };
+    let universe: Box<dyn Strategy> = if slot.brakes.crisis_entries {
+        Box::new(CrisisGate::new(universe, whole_year(periods_per_year)))
+    } else {
+        universe
+    };
     if z.portfolio_vol <= 0.0 {
         return Ok(universe);
     }
@@ -67,6 +72,16 @@ pub fn strategy(slot: &SlotConfig, instruments: usize) -> Result<Box<dyn Strateg
             band: z.band.max(0.1),
         },
     )))
+}
+
+/// A year of bars, rounded.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a positive bar count, rounded"
+)]
+const fn whole_year(periods_per_year: f64) -> usize {
+    periods_per_year.round().max(2.0) as usize
 }
 
 /// The engine's configuration: the slot's costs, brakes and exits, and the **envelope's** daily

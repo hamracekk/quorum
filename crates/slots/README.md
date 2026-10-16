@@ -11,7 +11,8 @@ can run inside one.
 
 | File | What it holds |
 |---|---|
-| `config.rs` | `SlotId`, `SlotConfig` (parse, validate, `check_envelope`), `Universe` (fixed or point-in-time top volume → `core::strategies::UniverseRule`), `StrategySpec` (`trend-momentum`, `xs-momentum`), `Sizing`, `Brakes` (`vol_regime`), `Exits`, `TradingCalendar` (`always-open` 365 days, `weekdays` 252; `bars_per_year` annualises), `CostModel` (→ `BacktestConfig`) |
+| `ucits.rs` | `UcitsUniverse` (`config/universe/ucits.toml`): UCITS funds by ISIN (check digit validated), their listings (exchange, symbol, currency), research stand-ins, `verified` once checked against the broker |
+| `config.rs` | `SlotId`, `SlotConfig` (parse, validate, `check_envelope`), `Universe` (fixed or point-in-time top volume → `core::strategies::UniverseRule`), `StrategySpec` (`trend-momentum`, `xs-momentum`), `Sizing`, `Brakes` (`vol_regime`, `crisis_entries`), `Exits`, `TradingCalendar` (`always-open` 365 days, `weekdays` 252; `bars_per_year` annualises), `CostModel` (→ `BacktestConfig`) |
 | `ladder.rs` | `SlotState` (mode, since, halted; serializable), `review` → `Transition`; `Gates` (thresholds), `Evidence` (grouped per gate), `Blocker`, `Trigger` |
 | `config/tests.rs`, `ladder/tests.rs` | Validation, the shipped `config/slots/crypto-spot.toml` inside the shipped envelope, every ladder path |
 

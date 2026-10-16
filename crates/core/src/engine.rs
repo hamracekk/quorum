@@ -399,6 +399,12 @@ impl<'s> Engine<'s> {
         queue.make_contiguous().sort_by_key(|p| p.ts);
     }
 
+    /// Adds a contribution of `amount` cash (negative: a withdrawal). Nothing trades by
+    /// itself: a strategy that invests it does so through `Strategy::on_book`.
+    pub fn deposit(&mut self, amount: f64) {
+        self.portfolio.deposit(amount);
+    }
+
     /// Net funding paid so far (negative: received).
     pub const fn funding_paid(&self) -> f64 {
         self.funding_paid
@@ -873,6 +879,26 @@ impl<'s> Engine<'s> {
 
         if self.killed {
             return;
+        }
+        if self.measuring(ts) {
+            let book = crate::strategy::BookView {
+                ts,
+                equity: self.portfolio.equity(),
+                cash: self.portfolio.cash(),
+                values: self
+                    .portfolio
+                    .positions()
+                    .filter_map(|(i, qty)| Some((i.clone(), qty * self.portfolio.mark_of(i)?)))
+                    .collect(),
+            };
+            if let Some(targets) = self.strategy.on_book(&book) {
+                // Set from the book: re-applied to the actual position even if the target
+                // number is unchanged, so only the difference trades.
+                for (instrument, target) in targets {
+                    self.current.remove(&instrument);
+                    self.desired.insert(instrument, target);
+                }
+            }
         }
         // A close asked for while already flat is done at once.
         let done: Vec<InstrumentId> = self

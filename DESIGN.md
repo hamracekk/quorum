@@ -500,10 +500,10 @@ Each phase ends with a measurable exit criterion, not a feature list.
 |---|---|---|
 | **P0 Foundation** 🔄 | Repo, copy core/bus/journal/lab/risk from trader with history, envelope (paper only), slot model, NATS, Postgres, launchd services | trader's golden backtest reproduces bit for bit; crypto-spot slot paper-trades on the laptop and resumes cleanly after sleep |
 | **P1 Recorder + factors** 🔄 recorder ✅, price factors + study ✅, regime model ✅ | Forward recorder, PIT store, first factor families (price, structure, macro), regime model | 2 weeks of clean recorded data; each factor has an event-study report |
-| **P2 Second market** 🔄 multi-asset ETF research slot (Tiingo) ✅ | `equities` slot on IBKR paper (UCITS ETFs, stocks), trading calendars, equity data | Equity slot runs paper 4 weeks alongside crypto |
+| **P2 Second market** 🔄 multi-asset ETF research slot (Tiingo) ✅, ETF slot paper-trading on Tiingo end-of-day prices with simulated fills ✅ (US ETFs standing in for UCITS twins until IBKR), exchange calendars (Xetra, LSE, NYSE) and the UCITS universe by ISIN ✅ (listings to verify with IBKR) | `equities` slot on IBKR paper (UCITS ETFs, stocks), trading calendars, equity data | Equity slot runs paper 4 weeks alongside crypto |
 | **P3 Allocator + risk process** 🔄 allocation study ✅ (risk parity + regime: drawdown 6–10% vs 35% crypto alone; strict exit not met: ETFs alone had the better later Sharpe), stress tests ✅ (book passes all 9; crypto alone fails covid 2020 and 2022 at the 15% account limit; ETFs alone fail a −30% gap), passive benchmark ✅ (`config/benchmark.toml`; 2019–2026, after costs, before tax: no variant beats or trails US equity, 60/40 or cash significantly; risk parity 10.8%/yr, 12% max DD vs 60/40 8.2%, 28%; US equity 15.8%), survivorship-free crypto ✅ (crypto-pit: 28.8%/yr on today's 25 survivors falls to 15.6% on the point-in-time top 25, drawdown 35% → 44%; walk-forward −20.8%/yr since 2024-03; in CZK after tax the risk-parity book makes 4.4%/yr vs world equity 12.5% and 60/40 8.0%, none significant), risk process ✅ slice 2 (flatten on halt, position and cluster limits, stale data), risk process ✅ slice 1 (separate process approves every paper order: envelope, leverage, daily/total loss halts, kill switch; Unix socket on the laptop, NATS with the server) | Cross-slot allocator, separate risk process, brakes, stress tests | Combined walk-forward beats each slot alone on Sharpe and drawdown |
 | **P4 Knowledge plane** 🔄 fetch + tiered Claude extraction + impact themes ✅ (scoring, priced-in next) | Tiered Claude extraction, impact map, priced-in check, prompt records | 4 weeks of extraction with a scored record per event kind |
-| **P5 Evaluator** 🔄 case files + counterfactual labels ✅ shadow (`quorum evaluate`: ~2 000 history cases per slot; no price, rank or portfolio-fit feature separates winners out of sample on crypto or ETFs; crisis-regime entries lose on crypto, but a skip rule cannot be confirmed: 60 crisis entries in sample −8.1%, only 3 out of sample; risk-off flipped from +10.0% in sample to −3.4% out of sample; on survivorship-free crypto (crypto-pit) the crisis skip holds out of sample: 76 entries −6.5% in, 20 entries −4.7% out, t −4.1), shadow meta model ✅ (logistic, walk-forward, purged: no edge on crypto-spot, crypto-pit or ETFs; AUC 0.53–0.54) | Case files, counterfactual tracking, meta-labeling (shadow first), Claude review (shadow first) | Meta model beats "always take" out of sample on ≥ 200 trades |
+| **P5 Evaluator** 🔄 case files + counterfactual labels ✅ shadow (`quorum evaluate`: ~2 000 history cases per slot; no price, rank or portfolio-fit feature separates winners out of sample on crypto or ETFs; crisis-regime entries lose on crypto, but a skip rule cannot be confirmed: 60 crisis entries in sample −8.1%, only 3 out of sample; risk-off flipped from +10.0% in sample to −3.4% out of sample; on survivorship-free crypto (crypto-pit) the crisis skip holds out of sample: 76 entries −6.5% in, 20 entries −4.7% out, t −4.1); as a strategy-level brake (`brakes.crisis_entries`) it adds only +0.1–0.2%/yr and −1 pt drawdown on crypto and nothing on ETFs: crisis periods are rare and the vol brake already halves them, so it stays off, shadow meta model ✅ (logistic, walk-forward, purged: no edge on crypto-spot, crypto-pit or ETFs; AUC 0.53–0.54) | Case files, counterfactual tracking, meta-labeling (shadow first), Claude review (shadow first) | Meta model beats "always take" out of sample on ≥ 200 trades |
 | **P6 Execution + live-micro** | Move to a VPS, raise the envelope, EMS tactics, TCA, reconciliation, first slot to LiveMicro via the gate | 12 weeks live-micro with slippage inside 1.5× model and no reconciliation break |
 | **P7 Expand** | Carry slot, futures slot, more factors, research agents at scale | Each new slot passes the ladder on its own |
 
@@ -585,7 +585,7 @@ Several factors have to agree before a trade happens. The repo is `quorum`, bina
 
 ---
 
-## 20. Long-term book (planned, 2026-10-16)
+## 20. Long-term book (foundation built 2026-10-16)
 
 A buy-and-hold part of quorum, **separate from the trading slots**: its own envelope section and
 capital (never shared with or moved by the allocator), its own broker account or DIP so tax lots
@@ -594,6 +594,13 @@ ISIN, rebalance bands), rules for contributions and band rebalancing that prefer
 and a quarterly **AI review** of the holdings that only proposes changes (with their tax cost),
 is journaled and scored against "keep the policy unchanged". The risk process still approves every
 order. Evidence, Czech tax notes and the full sketch: [docs/long-term-investing.md](docs/long-term-investing.md).
+
+**Built:** `crates/longterm` and `quorum longterm backtest` (`config/longterm.toml`): policies run on
+the one engine (`Engine::deposit`, `Strategy::on_book`), contributions buy the most underweight
+holdings, a band breach rebalances, fills become CZK tax lots (FIFO, three-year test). 2006–2026
+with 100k CZK + 5k a month (example policies, US ETFs as UCITS stand-ins): world equity 11.1%/yr
+money-weighted (drawdown 55%), balanced 60/30/10 8.9% (33%), 60/40 8.0% (35%); almost no tax,
+as lots outlive the time test. Next: paper running, IBKR UCITS prices, the AI review.
 
 ---
 

@@ -21,6 +21,7 @@ quorum secrets set tiingo | ntfy-topic | status   # secrets in the macOS keychai
 quorum notify --test                            # phone alert test through ntfy
 quorum watchdog --slots crypto-spot             # one health check (launchd runs it every 5 min)
 quorum news fetch | extract | run | list | status   # knowledge plane (config/news.toml, impact.toml)
+quorum longterm backtest                          # long-term policies in CZK (config/longterm.toml)
 quorum evaluate --slot S [--source history|paper]   # trade evaluator in shadow: case files, counterfactual labels, study
 quorum risk run | status | halt [--slot S] --reason R | resume [--slot S]   # risk process + kill switch
 ```

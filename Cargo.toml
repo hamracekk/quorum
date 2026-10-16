@@ -60,6 +60,7 @@ quorum-notify = { path = "crates/notify" }
 quorum-knowledge = { path = "crates/knowledge" }
 quorum-risk = { path = "crates/risk" }
 quorum-evaluator = { path = "crates/evaluator" }
+quorum-longterm = { path = "crates/longterm" }
 
 # Centralized lint policy — every crate opts in with `[lints] workspace = true`.
 # Levels are `warn` locally (so dev builds stay usable); `cargo lint` and CI pass

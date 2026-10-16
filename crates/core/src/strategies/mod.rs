@@ -1,4 +1,5 @@
 mod buy_and_hold;
+mod crisis;
 mod delist_exit;
 mod ensemble;
 mod exposure;
@@ -14,6 +15,7 @@ mod sma_cross;
 mod universe;
 
 pub use buy_and_hold::BuyAndHold;
+pub use crisis::CrisisGate;
 pub use delist_exit::{DELISTING, DelistExit, HOLD_FLAT_DAYS};
 pub use ensemble::{Ensemble, EnsembleConfig, SourceWeight};
 pub use exposure::ExposureSchedule;

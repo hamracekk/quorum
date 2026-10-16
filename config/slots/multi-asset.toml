@@ -1,14 +1,13 @@
-# Multi-asset research slot: 25 liquid US-listed ETFs across asset classes, so factor studies
-# test across markets, not only within crypto. Research only: Tiingo (end-of-day, adjusted
-# prices) is a data source, not a venue; the envelope does not allow it, so this slot cannot
-# paper-trade. EU retail cannot buy these US ETFs (PRIIPs, DESIGN §19.1): trading the results
-# means UCITS equivalents or futures through IBKR.
+# Multi-asset slot: 25 liquid US-listed ETFs across asset classes, so quorum is tested beyond
+# crypto. Paper only, on Tiingo end-of-day prices (adjusted) with simulated fills: Tiingo is a
+# price source, not a broker. EU retail cannot buy these US ETFs (PRIIPs, DESIGN §19.1): they
+# stand in for UCITS twins on the same indices until IBKR supplies those prices and fills.
 
 id = "multi-asset"
 venue = "tiingo"
 interval = "1d"
 calendar = "weekdays"
-start_mode = "research"
+start_mode = "paper"
 paper_capital = 10000
 history_days = 730
 

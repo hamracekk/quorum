@@ -33,6 +33,8 @@ pub struct Observation {
     pub recorder_last_write: Option<DateTime<Utc>>,
     /// Whether the risk process answered; `None` when it was not checked.
     pub risk_answered: Option<bool>,
+    /// Whether the risk process could read the envelope; `None` when it did not say.
+    pub envelope_ok: Option<bool>,
 }
 
 /// What the watchdog remembers between runs.
@@ -86,6 +88,18 @@ fn incidents(o: &Observation) -> BTreeMap<String, (Severity, String)> {
                 Severity::Critical,
                 "it does not answer: paper slots refuse every order that adds risk until it is back \
                  (`launchctl kickstart gui/$(id -u)/com.quorum.risk`)"
+                    .to_owned(),
+            ),
+        );
+    }
+    if o.envelope_ok == Some(false) {
+        found.insert(
+            "envelope unreadable".to_owned(),
+            (
+                Severity::Critical,
+                "the risk process cannot read config/envelope.toml: every order that adds risk is \
+                 refused until it can (a typo, or a new field the running build does not know: \
+                 rebuild and restart it)"
                     .to_owned(),
             ),
         );
@@ -169,6 +183,7 @@ mod tests {
             slots: vec![("crypto-spot".into(), Some((status.into(), t(heartbeat))))],
             recorder_last_write: Some(t(recorder)),
             risk_answered: Some(true),
+            envelope_ok: Some(true),
         }
     }
 
@@ -230,6 +245,18 @@ mod tests {
         let (second, state) = evaluate(&seen(15, 15, "running", 14), &state);
         assert!(second[0].title.contains("recovered"));
         assert!(state.open.is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_envelope_is_critical() {
+        let broken = Observation {
+            envelope_ok: Some(false),
+            ..seen(10, 10, "running", 9)
+        };
+        let (alerts, _) = evaluate(&broken, &WatchState::default());
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].severity, Severity::Critical);
+        assert!(alerts[0].title.contains("envelope unreadable"));
     }
 
     #[test]
