@@ -1,0 +1,14 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'knowledge'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'quorum-knowledge'
+  description: 'Knowledge plane: news fetch, tagging, tiered Claude extraction, impact themes'
+dependsOn:
+  - 'core'
+  - 'ai'
+  - 'slots'
+  - 'journal'

@@ -1637,12 +1637,15 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "quorum-ai",
  "quorum-bus",
  "quorum-core",
  "quorum-data",
  "quorum-envelope",
  "quorum-journal",
+ "quorum-knowledge",
  "quorum-lab",
+ "quorum-news",
  "quorum-notify",
  "quorum-recorder",
  "quorum-runner",
@@ -1732,6 +1735,22 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "quorum-knowledge"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "quorum-ai",
+ "quorum-core",
+ "quorum-journal",
+ "quorum-slots",
+ "serde",
+ "thiserror",
+ "tokio",
+ "toml",
  "tracing",
 ]
 
