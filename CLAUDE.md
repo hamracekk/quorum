@@ -68,4 +68,5 @@ cargo run --release -p quorum-cli -- secrets status   # which API keys are in th
 cargo run --release -p quorum-cli -- regime --slot crypto-spot   # current regime + whether it helps
 cargo run --release -p quorum-cli -- backtest --slot crypto-spot --daily-loss off   # compare risk settings
 cargo run --release -p quorum-cli -- allocate   # walk-forward each slot, study allocating across them
+cargo run --release -p quorum-cli -- stress     # stress gate: crises and synthetic shocks per slot and book
 ```

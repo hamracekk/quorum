@@ -84,6 +84,14 @@ enum Command {
         #[arg(long, value_delimiter = ',', default_value = "crypto-spot,multi-asset")]
         slots: Vec<String>,
     },
+    /// Stress-test slots and their risk-parity + regime book: historical crises and synthetic
+    /// shocks (gap, outage, volatility spike, costs x5), judged against the envelope's
+    /// `total_max` drawdown.
+    Stress {
+        /// Comma-separated slot ids.
+        #[arg(long, value_delimiter = ',', default_value = "crypto-spot,multi-asset")]
+        slots: Vec<String>,
+    },
     /// Research data, kept apart from what paper sessions replay.
     Research {
         #[command(subcommand)]
@@ -191,6 +199,9 @@ async fn main() -> Result<ExitCode> {
         }
         Command::Backtest { slot, daily_loss } => {
             backtest(&cli.config, &cli.data, &slot, &daily_loss).map(|()| ExitCode::SUCCESS)
+        }
+        Command::Stress { slots } => {
+            stress(&cli.config, &cli.data, &slots).map(|()| ExitCode::SUCCESS)
         }
         Command::Allocate { slots } => {
             allocate(&cli.config, &cli.data, &slots).map(|()| ExitCode::SUCCESS)
@@ -554,6 +565,25 @@ const fn whole_bars(bars: f64) -> usize {
     bars.round().max(1.0) as usize
 }
 
+/// Day → the exposure each market regime allows (trending 1, choppy 0.6, risk-off 0.3,
+/// crisis 0), the map the allocation studies tilt by.
+fn regime_exposure(
+    series: &[quorum_core::Series],
+    year: usize,
+) -> std::collections::BTreeMap<chrono::NaiveDate, f64> {
+    use quorum_core::regime::{Regime, RegimeRule, regimes};
+    let exposure = |r: Regime| match r {
+        Regime::Trending => 1.0,
+        Regime::Choppy => 0.6,
+        Regime::RiskOff => 0.3,
+        Regime::Crisis => 0.0,
+    };
+    regimes(series, &RegimeRule::default(), year)
+        .into_iter()
+        .map(|p| (p.ts.date_naive(), exposure(p.regime)))
+        .collect()
+}
+
 /// One slot's walk-forward curve (lookback chosen per window on the year before) and its
 /// market's regime exposure per day, with or without the envelope's daily loss limit.
 fn slot_stream(
@@ -563,7 +593,6 @@ fn slot_stream(
     envelope: &Envelope,
     daily_limit: bool,
 ) -> Result<quorum_lab::allocation::SlotStream> {
-    use quorum_core::regime::{Regime, RegimeRule, regimes};
     use quorum_lab::{WalkForwardConfig, walk_forward};
 
     let n = series.len();
@@ -589,21 +618,199 @@ fn slot_stream(
     };
     let report = walk_forward(&grid, &factory, series, &cfg, wf)
         .with_context(|| format!("walk-forward {}", slot.id))?;
-    let exposure = |r: Regime| match r {
-        Regime::Trending => 1.0,
-        Regime::Choppy => 0.6,
-        Regime::RiskOff => 0.3,
-        Regime::Crisis => 0.0,
-    };
-    let regime_exposure = regimes(series, &RegimeRule::default(), year)
-        .into_iter()
-        .map(|p| (p.ts.date_naive(), exposure(p.regime)))
-        .collect();
+    let regime_exposure = regime_exposure(series, year);
     Ok(quorum_lab::allocation::SlotStream {
         name: slot.id.to_string(),
         curve: report.curve,
         regime_exposure,
     })
+}
+
+/// A slot's strategy and buy & hold curves over `series`.
+fn curves(
+    slot: &SlotConfig,
+    series: &[quorum_core::Series],
+    cfg: &quorum_core::BacktestConfig,
+) -> Result<(Vec<quorum_core::EquityPoint>, Vec<quorum_core::EquityPoint>)> {
+    let mut strategy = quorum_runner::strategy(slot, series.len())?;
+    let result = quorum_core::run(strategy.as_mut(), series, cfg);
+    Ok((result.equity_curve, result.benchmark_curve))
+}
+
+/// The risk-parity + regime book of several slots' curves.
+fn book(
+    curves: &[(String, Vec<quorum_core::EquityPoint>)],
+    tilts: &[std::collections::BTreeMap<chrono::NaiveDate, f64>],
+) -> Vec<quorum_core::EquityPoint> {
+    use quorum_lab::portfolio::{CombineConfig, Stream, Weighting, combine};
+    let streams: Vec<Stream> = curves
+        .iter()
+        .map(|(name, curve)| Stream {
+            name: name.clone(),
+            curve: curve.clone(),
+        })
+        .collect();
+    let cfg = CombineConfig {
+        initial_cash: 10_000.0,
+        weighting: Weighting::InverseVol { max_weight: 0.8 },
+        vol_window_days: 60,
+        rebalance_days: 7,
+        tilts: tilts.to_vec(),
+    };
+    combine(&streams, &cfg).curve
+}
+
+/// A synthetic shock: its name and how it changes a slot's bars and costs.
+type Shock = (
+    &'static str,
+    fn(&[quorum_core::Series], chrono::DateTime<chrono::Utc>) -> Vec<quorum_core::Series>,
+    f64,
+);
+
+fn print_stress(
+    rows: &[quorum_lab::stress::StressRow],
+    limit: f64,
+    shock_window: (chrono::NaiveDate, chrono::NaiveDate),
+) {
+    println!(
+        "stress tests · gate: max drawdown inside the scenario ≤ {:.0}% (envelope total_max) · synthetic shocks on {}, measured to {}",
+        limit * 100.0,
+        shock_window.0,
+        shock_window.1
+    );
+    println!(
+        "{:<30} {:<28} {:>8} {:>7} {:>8}   {:>8} {:>7}   gate",
+        "scenario", "subject", "return", "max DD", "worst", "hold ret", "hold DD"
+    );
+    for r in rows {
+        let (hr, hd) = r.hold.map_or_else(
+            || (String::new(), String::new()),
+            |h| {
+                (
+                    format!("{:+.0}%", h.total_return * 100.0),
+                    format!("{:.0}%", h.max_drawdown * 100.0),
+                )
+            },
+        );
+        println!(
+            "{:<30} {:<28} {:>+7.0}% {:>6.0}% {:>+7.1}%   {:>8} {:>7}   {}",
+            r.scenario,
+            r.subject,
+            r.strategy.total_return * 100.0,
+            r.strategy.max_drawdown * 100.0,
+            r.strategy.worst_step * 100.0,
+            hr,
+            hd,
+            if r.passes { "pass" } else { "FAIL" }
+        );
+    }
+}
+
+fn stress(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
+    use chrono::DurationRound as _;
+    use quorum_lab::stress::{HISTORICAL, StressRow, day, gap, outage, vol_spike, window};
+
+    let envelope = Envelope::load(&config.join("envelope.toml")).context("envelope")?;
+    let limit = envelope.loss().total_max;
+    let mut inputs = Vec::new();
+    for id in slots {
+        inputs.push(research_series(config, data, id)?);
+    }
+    // Synthetic shocks hit every slot on the same day: 200 days before the earliest last bar.
+    let last = inputs
+        .iter()
+        .filter_map(|(_, series, _)| {
+            series
+                .iter()
+                .filter_map(|s| s.bars.last())
+                .map(|b| b.ts)
+                .max()
+        })
+        .min()
+        .context("no bars")?;
+    let at = (last - chrono::Duration::days(200))
+        .duration_trunc(chrono::Duration::days(1))
+        .context("shock date")?;
+    let shock_window = (
+        at.date_naive(),
+        (at + chrono::Duration::days(60)).date_naive(),
+    );
+    let shocks: [Shock; 4] = [
+        ("gap −30% overnight", |s, at| gap(s, at, 0.7), 1.0),
+        (
+            "outage 5 days, reopens −15%",
+            |s, at| outage(s, at, 5, 0.85),
+            1.0,
+        ),
+        (
+            "volatility ×3 for 30 days",
+            |s, at| vol_spike(s, at, 30, 3.0),
+            1.0,
+        ),
+        ("liquidity drought: costs ×5", |s, _| s.to_vec(), 5.0),
+    ];
+
+    let mut rows = Vec::new();
+    let mut tilts = Vec::new();
+    let mut base_curves = Vec::new();
+    let mut shocked_curves: Vec<Vec<(String, Vec<quorum_core::EquityPoint>)>> =
+        vec![Vec::new(); shocks.len()];
+    for (slot, series, per_year) in &inputs {
+        let cfg = quorum_runner::backtest_config(slot, &envelope);
+        let (curve, hold) = curves(slot, series, &cfg)?;
+        for (name, from, to) in HISTORICAL {
+            let (Some(from), Some(to)) = (day(from), day(to)) else {
+                continue;
+            };
+            if let Some(s) = window(&curve, from, to) {
+                rows.push(StressRow::new(
+                    name,
+                    slot.id.as_str(),
+                    s,
+                    window(&hold, from, to),
+                    limit,
+                ));
+            }
+        }
+        for (k, (name, shock, cost)) in shocks.iter().enumerate() {
+            let mut cfg = cfg.clone();
+            cfg.fee_rate *= cost;
+            cfg.slippage_bps *= cost;
+            cfg.impact *= cost;
+            let (curve, hold) = curves(slot, &shock(series, at), &cfg)?;
+            if let Some(s) = window(&curve, shock_window.0, shock_window.1) {
+                let h = window(&hold, shock_window.0, shock_window.1);
+                rows.push(StressRow::new(name, slot.id.as_str(), s, h, limit));
+            }
+            shocked_curves[k].push((slot.id.to_string(), curve));
+        }
+        tilts.push(regime_exposure(series, whole_bars(*per_year)));
+        base_curves.push((slot.id.to_string(), curve));
+    }
+    if inputs.len() > 1 {
+        let subject = "book: risk parity + regime";
+        let combined = book(&base_curves, &tilts);
+        for (name, from, to) in HISTORICAL {
+            let (Some(from), Some(to)) = (day(from), day(to)) else {
+                continue;
+            };
+            if let Some(s) = window(&combined, from, to) {
+                rows.push(StressRow::new(name, subject, s, None, limit));
+            }
+        }
+        for ((name, _, _), shocked) in shocks.iter().zip(&shocked_curves) {
+            let combined = book(shocked, &tilts);
+            if let Some(s) = window(&combined, shock_window.0, shock_window.1) {
+                rows.push(StressRow::new(name, subject, s, None, limit));
+            }
+        }
+    }
+
+    print_stress(&rows, limit, shock_window);
+    let failed = rows.iter().filter(|r| !r.passes).count();
+    println!("{} scenarios, {failed} failed", rows.len());
+    println!("report: {}", save_report(data, "stress", &rows)?.display());
+    Ok(())
 }
 
 fn allocate(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
