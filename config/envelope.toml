@@ -13,7 +13,9 @@ leverage_max = 1.0
 venues_allowed = ["binance"]
 
 # Fractions of equity. Enforced in paper too, so the limits are tested before money is at risk.
-loss = { daily_max = 0.02, total_max = 0.15 }
+# Daily 5% (operator decision 2026-10-16): on daily crypto 2% halted 17 times a year and hurt
+# (`quorum backtest --daily-loss`); 5% halts about twice a year with the smallest drawdown.
+loss = { daily_max = 0.05, total_max = 0.15 }
 
 # Bounds for every slot without its own entry below.
 slot_default = { capital_max = 0, max_mode = "paper" }

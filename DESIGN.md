@@ -155,7 +155,7 @@ envelope is paper only (§19.2).
 | `capital_total` | 20,000 EUR | Most capital the system may ever deploy |
 | `slot.<name>.capital_max` | 5,000 | Cap per slot |
 | `slot.<name>.max_mode` | `live-micro` | Highest rung the slot may reach on its own |
-| `loss.daily_max` | 2% | Breach → flatten everything, halt until the next UTC day |
+| `loss.daily_max` | 5% | Breach (against the previous close) → flatten everything, halt until the next UTC day. 2% halted daily crypto 17×/yr and hurt; 5% is the shipped value |
 | `loss.total_max` | 15% from peak | Breach → flatten, halt, require operator |
 | `leverage_max` | 1.5× | Gross exposure / equity |
 | `venues_allowed` | ibkr, a MiCA-authorised crypto exchange | Nothing else can be traded |
