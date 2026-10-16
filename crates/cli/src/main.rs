@@ -22,6 +22,7 @@ use quorum_recorder::{Feeds, RecordStore, RecorderConfig, record};
 use quorum_runner::{Ports, RunOptions, SlotFiles, request_stop, run};
 use quorum_slots::{SlotConfig, SlotId};
 
+mod evaluate;
 mod news;
 mod risk;
 mod secrets;
@@ -61,6 +62,15 @@ enum Command {
         /// Bars between rebalance dates and the forward window.
         #[arg(long, default_value_t = 7)]
         horizon: usize,
+    },
+    /// Trade evaluator in shadow: a case file for every entry the slot's strategy proposes,
+    /// labelled taken or not, and whether anything in them tells winners from losers out of
+    /// sample. Cases to `<data>/evaluator/`, report to `<data>/reports/`.
+    Evaluate {
+        #[arg(long)]
+        slot: String,
+        #[arg(long, value_enum, default_value_t = evaluate::Source::History)]
+        source: evaluate::Source,
     },
     /// Label a slot's market (trending, choppy, risk-off, crisis) and study whether the label
     /// separates risk and pays, in-sample vs out-of-sample. Report to `<data>/reports/`.
@@ -246,6 +256,9 @@ async fn main() -> Result<ExitCode> {
         Command::Regime { slot, horizon } => {
             regime(&cli.config, &cli.data, &slot, horizon).map(|()| ExitCode::SUCCESS)
         }
+        Command::Evaluate { slot, source } => evaluate::run(&cli.config, &cli.data, &slot, source)
+            .await
+            .map(|()| ExitCode::SUCCESS),
         Command::Factors { slot, horizon } => {
             factors(&cli.config, &cli.data, &slot, horizon).map(|()| ExitCode::SUCCESS)
         }

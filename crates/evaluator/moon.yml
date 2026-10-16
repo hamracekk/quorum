@@ -1,0 +1,12 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'evaluator'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'quorum-evaluator'
+  description: 'Trade evaluator: case files, outcome labels (taken and counterfactual), shadow study'
+dependsOn:
+  - 'core'
+  - 'lab'

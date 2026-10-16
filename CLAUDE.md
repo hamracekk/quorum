@@ -44,6 +44,9 @@ change when its module map, invariants or extension steps change.
   validated against a closed schema (`quorum_ai`) or rejected whole; readings are journaled for
   scoring and never place or size an order. The impact map is operator-written; models never add
   links. Bump `PROMPT_VERSION` / `THEMES_VERSION` when a prompt or schema changes.
+- **The evaluator is shadow until it earns weight.** `quorum_evaluator` builds case files and
+  labels every proposed entry, taken or not; nothing it computes reaches a target, order or size
+  until a meta model beats "always take" out of sample (DESIGN §10, P5 exit).
 - **Regime rules are fixed in advance.** Thresholds in `core::regime::RegimeRule::default` are
   not tuned per market or to results; changing them is a new hypothesis, studied again.
 - **Everything earns its weight.** Factors, strategies, prompts, models and slots start at zero
@@ -85,4 +88,5 @@ cargo run --release -p quorum-cli -- regime --slot crypto-spot   # current regim
 cargo run --release -p quorum-cli -- backtest --slot crypto-spot --daily-loss off   # compare risk settings
 cargo run --release -p quorum-cli -- allocate   # walk-forward each slot, study allocating across them
 cargo run --release -p quorum-cli -- stress     # stress gate: crises and synthetic shocks per slot and book
+cargo run --release -p quorum-cli -- evaluate --slot crypto-spot [--source paper]   # trade evaluator (shadow)
 ```
