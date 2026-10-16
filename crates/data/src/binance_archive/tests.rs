@@ -59,3 +59,27 @@ fn metrics_keep_the_days_last_reading() {
     assert_eq!(m.ts.date_naive(), day);
     assert!(parse_metrics("create_time,symbol\n", day).is_none());
 }
+
+#[test]
+fn candidates_are_usdt_coins_not_currencies_or_leveraged_tokens() {
+    let symbols: Vec<String> = [
+        "BTCUSDT",
+        "ETHUSDT",
+        "LUNAUSDT",
+        "USDCUSDT",
+        "EURUSDT",
+        "BTCUPUSDT",
+        "ETHBEARUSDT",
+        "BTCBUSD",
+        "ETHBTC",
+        "UPUSDT",
+        "BTCUSDT",
+    ]
+    .iter()
+    .map(|s| (*s).to_owned())
+    .collect();
+    assert_eq!(
+        usdt_candidates(&symbols),
+        ["BTCUSDT", "ETHUSDT", "LUNAUSDT", "UPUSDT"]
+    );
+}

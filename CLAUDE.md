@@ -88,6 +88,7 @@ cargo run --release -p quorum-cli -- news fetch | extract | list | status   # kn
 cargo run --release -p quorum-cli -- risk status | halt --reason R | resume   # risk process, kill switch
 ./deploy/launchd/install-risk.sh            # risk process (`quorum risk run`); install before slots
 cargo run --release -p quorum-cli -- research sync --slot crypto-spot   # long history → data/research/bars
+cargo run --release -p quorum-cli -- research sync --slot crypto-pit    # survivorship-free crypto: every USDT pair, delisted included
 cargo run --release -p quorum-cli -- factors --slot crypto-spot   # factor study (IC, OOS, after costs)
 cargo run --release -p quorum-cli -- secrets status   # which API keys are in the keychain (never printed)
 cargo run --release -p quorum-cli -- regime --slot crypto-spot   # current regime + whether it helps

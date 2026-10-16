@@ -310,5 +310,104 @@ pub fn parse_csv(csv: &str) -> Result<Vec<Bar>> {
     Ok(bars)
 }
 
+/// Bases that are stablecoins or fiat: their USDT pairs are currency, not crypto risk.
+const NOT_CRYPTO: &[&str] = &[
+    "USDC", "BUSD", "TUSD", "USDP", "PAX", "DAI", "FDUSD", "USDS", "USDE", "PYUSD", "UST", "SUSD",
+    "AEUR", "EURI", "EUR", "GBP", "AUD", "TRY", "BRL", "RUB", "UAH", "NGN", "ZAR", "BIDR", "IDRT",
+    "BVND", "BKRW", "PLN", "RON", "ARS", "JPY", "MXN", "COP", "CZK",
+];
+
+/// Leveraged-token suffixes (BTCUPUSDT, ETHBEARUSDT): decaying products, not coins.
+const LEVERAGED: &[&str] = &["UP", "DOWN", "BULL", "BEAR"];
+
+/// The USDT spot pairs a crypto universe may hold, from every symbol the archive lists:
+/// stablecoins, fiat and leveraged tokens are left out. Sorted.
+#[must_use]
+pub fn usdt_candidates(symbols: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = symbols
+        .iter()
+        .filter_map(|s| {
+            let base = s.strip_suffix("USDT")?;
+            let leveraged = LEVERAGED
+                .iter()
+                .any(|l| base.len() > l.len() + 1 && base.ends_with(l));
+            (!base.is_empty() && !NOT_CRYPTO.contains(&base) && !leveraged).then(|| s.clone())
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// What [`sync_archive`] did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArchiveSync {
+    /// Downloaded and stored now.
+    pub fetched: usize,
+    /// Already in the store, left as is.
+    pub kept: usize,
+    /// The archive had no bars for them.
+    pub empty: usize,
+    /// Failed (logged); a later run tries them again.
+    pub failed: usize,
+}
+
+/// Stores the archive's `interval` bars of every symbol the store does not hold yet.
+///
+/// Symbols are stored as `binance:<symbol>`, `concurrency` at a time. Delisted symbols keep their
+/// whole history; listed ones end at the archive's last full month.
+pub async fn sync_archive(
+    archive: &BinanceArchive,
+    store: &dyn quorum_core::BarStore,
+    symbols: &[String],
+    interval: &str,
+    concurrency: usize,
+) -> ArchiveSync {
+    use futures_util::StreamExt as _;
+    use quorum_core::{InstrumentId, Series};
+
+    let mut report = ArchiveSync::default();
+    let mut todo = Vec::new();
+    for symbol in symbols {
+        let Ok(id) = InstrumentId::spot("binance", symbol) else {
+            report.failed += 1;
+            continue;
+        };
+        match store.load(&id, interval) {
+            Ok(Some(s)) if !s.bars.is_empty() => report.kept += 1,
+            _ => todo.push((symbol.clone(), id)),
+        }
+    }
+    let total = todo.len();
+    let mut done = 0_usize;
+    let mut results = futures_util::stream::iter(todo)
+        .map(|(symbol, id)| async move {
+            let bars = archive.klines(&symbol, interval).await;
+            (symbol, id, bars)
+        })
+        .buffer_unordered(concurrency.max(1));
+    while let Some((symbol, id, bars)) = results.next().await {
+        done += 1;
+        match bars {
+            Ok(bars) if bars.is_empty() => report.empty += 1,
+            Ok(bars) => match store.save(&Series::new(id, bars), interval) {
+                Ok(()) => report.fetched += 1,
+                Err(err) => {
+                    tracing::warn!(%symbol, error = %err, "archive bars not stored");
+                    report.failed += 1;
+                }
+            },
+            Err(err) => {
+                tracing::warn!(%symbol, error = %err, "archive download failed");
+                report.failed += 1;
+            }
+        }
+        if done.is_multiple_of(25) || done == total {
+            tracing::info!(done, total, "archive sync");
+        }
+    }
+    report
+}
+
 #[cfg(test)]
 mod tests;
