@@ -9,7 +9,9 @@ use std::time::Duration as StdDuration;
 use chrono::{DateTime, Duration, DurationRound, Utc};
 use futures_util::StreamExt;
 use quorum_bus::Bus;
-use quorum_core::{Bar, Engine, EngineError, Event, InstrumentId, RunInfo, RunKind, Series};
+use quorum_core::{
+    Bar, Engine, EngineError, Event, InstrumentId, Notification, RunInfo, RunKind, Series, Severity,
+};
 use quorum_envelope::{Envelope, Mode};
 use quorum_slots::{Evidence, Gates, SlotConfig, SlotState, Transition, Universe};
 use serde::Serialize;
@@ -118,12 +120,9 @@ pub async fn run(
     let history = load_history(ports, slot, &instruments, options.now).await?;
     // The engine borrows the strategy for the whole run.
     let mut book = strategy(slot, instruments.len())?;
-    let engine = Engine::new(
-        book.as_mut(),
-        backtest_config(slot, envelope),
-        &instruments,
-        Some(session.trade_from),
-    );
+    let cfg = backtest_config(slot, envelope);
+    let daily_limit = cfg.risk.max_daily_loss;
+    let engine = Engine::new(book.as_mut(), cfg, &instruments, Some(session.trade_from));
     let mut live = Live {
         ports,
         files,
@@ -136,10 +135,49 @@ pub async fn run(
         clock: (options.now, Utc::now()),
         last_catch_up: None,
         catch_up_every: options.catch_up_every,
+        fills_since_summary: 0,
+        daily_limit,
     };
     live.rebuild(&instruments, history).await?;
+    let snapshot = live.engine.snapshot();
+    live.note(
+        Severity::Info,
+        if resumed {
+            "session resumed"
+        } else {
+            "session started"
+        },
+        &format!(
+            "equity {:.2} · {} positions · trading from {}",
+            snapshot.equity,
+            snapshot.positions.len(),
+            live.session.trade_from.date_naive()
+        ),
+    )
+    .send()
+    .await;
     let status = live.trade(&instruments, options.heartbeat, shutdown).await;
-    live.finish(status, resumed)
+    let outcome = live.finish(status, resumed);
+    match &outcome {
+        Ok(o) => {
+            let severity = if o.status.restart() {
+                Severity::Warning
+            } else {
+                Severity::Info
+            };
+            let body = format!("equity {:.2} · the next run resumes the session", o.equity);
+            live.note(severity, &format!("session {}", o.status), &body)
+                .send()
+                .await;
+        }
+        Err(err) => {
+            let body = format!("{err} · fix it; the next run resumes the session");
+            live.note(Severity::Critical, "stopped on an error", &body)
+                .send()
+                .await;
+        }
+    }
+    outcome
 }
 
 /// Checks the slot may paper-trade: venue allowed, ports on the slot's venue, and a ladder
@@ -254,6 +292,8 @@ fn open_session(
         journaled_until: None,
         ended_at: None,
         end_reason: None,
+        summarized_until: None,
+        summary_equity: None,
     };
     Ok((session, false))
 }
@@ -286,6 +326,18 @@ async fn load_history(
     Ok(series)
 }
 
+/// A notification on its way out.
+struct Outgoing(Arc<dyn quorum_core::Notifier>, Notification);
+
+impl Outgoing {
+    /// Best effort: a failure is logged, never returned.
+    async fn send(self) {
+        if let Err(err) = self.0.notify(&self.1).await {
+            tracing::warn!(error = %err, "notification not delivered");
+        }
+    }
+}
+
 /// Everything the live loop mutates.
 struct Live<'s> {
     ports: &'s Ports,
@@ -301,6 +353,10 @@ struct Live<'s> {
     clock: (DateTime<Utc>, DateTime<Utc>),
     last_catch_up: Option<tokio::time::Instant>,
     catch_up_every: StdDuration,
+    /// Fills since the last daily summary (live bars only).
+    fills_since_summary: usize,
+    /// The engine's daily loss limit, for halt alerts.
+    daily_limit: f64,
 }
 
 impl Live<'_> {
@@ -313,6 +369,70 @@ impl Live<'_> {
             .get(instrument)
             .and_then(|s| s.bars.last())
             .map(|b| b.ts)
+    }
+
+    /// A notification titled for this slot, with the notifier to send it through. Built apart
+    /// from the sending so the send's future holds no borrow of the runner.
+    fn note(&self, severity: Severity, what: &str, body: &str) -> Outgoing {
+        Outgoing(
+            Arc::clone(&self.ports.notifier),
+            Notification {
+                ts: Utc::now(),
+                severity,
+                title: format!("paper {} · {what}", self.session.slot),
+                body: body.to_owned(),
+            },
+        )
+    }
+    /// Once every instrument has reported the latest timestamp (or stopped reporting: delisted,
+    /// stale), sends that day's summary once: equity, changes, positions, fills.
+    async fn maybe_summary(&mut self) {
+        let Some(latest) = self
+            .series
+            .values()
+            .filter_map(|s| s.bars.last())
+            .map(|b| b.ts)
+            .max()
+        else {
+            return;
+        };
+        let complete = self.series.values().all(|s| {
+            s.bars
+                .last()
+                .is_none_or(|b| b.ts >= latest || b.ts < latest - self.step - self.step)
+        });
+        let fresh = self.session.summarized_until.is_none_or(|t| latest > t);
+        if !complete || !fresh || latest < self.session.trade_from {
+            return;
+        }
+        let snapshot = self.engine.snapshot();
+        let capital = self.session.config.paper_capital;
+        let before = self.session.summary_equity.unwrap_or(capital);
+        let ratio = |a: f64, b: f64| if b > 0.0 { a / b - 1.0 } else { 0.0 };
+        let invested = if snapshot.equity > 0.0 {
+            (snapshot.equity - snapshot.cash) / snapshot.equity
+        } else {
+            0.0
+        };
+        self.note(
+            Severity::Info,
+            &format!("day {}", latest.date_naive()),
+            &format!(
+                "equity {:.2} ({:+.2}% since the last summary, {:+.2}% since start) · {} positions, {:.0}% invested · {} fills{}",
+                snapshot.equity,
+                ratio(snapshot.equity, before) * 100.0,
+                ratio(snapshot.equity, capital) * 100.0,
+                snapshot.positions.len(),
+                invested * 100.0,
+                self.fills_since_summary,
+                if snapshot.halted { " · HALTED (daily loss limit)" } else { "" },
+            ),
+        )
+        .send()
+        .await;
+        self.session.summarized_until = Some(latest);
+        self.session.summary_equity = Some(snapshot.equity);
+        self.fills_since_summary = 0;
     }
 
     fn publish(&self, events: &[Event]) {
@@ -403,6 +523,7 @@ impl Live<'_> {
                         return Ok(Status::Stopped);
                     }
                     self.catch_up().await?;
+                    self.maybe_summary().await;
                     self.write_state("running", None)?;
                 }
                 next = stream.next() => match next {
@@ -410,6 +531,7 @@ impl Live<'_> {
                     Some(Err(err)) => tracing::warn!(error = %err, "live stream error"),
                     Some(Ok((instrument, bar))) => {
                         self.on_live_bar(&instrument, bar).await?;
+                        self.maybe_summary().await;
                         self.files.save_session(&self.session)?;
                         self.write_state("running", None)?;
                     }
@@ -459,6 +581,21 @@ impl Live<'_> {
             .journal
             .record(&self.session.id, &decisions)
             .await?;
+        for event in &decisions {
+            match event {
+                Event::Fill(_) => self.fills_since_summary += 1,
+                Event::RiskHalt { equity, .. } => {
+                    let body = format!(
+                        "the day lost {:.0}% or more: positions are flattened at the next open and trading resumes the day after · equity {equity:.2}",
+                        self.daily_limit * 100.0
+                    );
+                    self.note(Severity::Warning, "risk halt", &body)
+                        .send()
+                        .await;
+                }
+                _ => {}
+            }
+        }
         self.session.journaled_until = Some(bar.ts);
         if let Some(series) = self.series.get_mut(instrument) {
             series.bars.push(bar);

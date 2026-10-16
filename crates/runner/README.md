@@ -11,6 +11,7 @@ trader's paper daemon, scoped to a slot and its envelope.
 | `build.rs` | `strategy` (slot strategy → per-holding vol sizing → optional top-volume universe → optional book vol target), `backtest_config` (slot costs, brakes, exits + the envelope's daily loss), `interval_duration` |
 | `session.rs` | `SlotFiles` (`<data>/slots/<id>/`), `Session`, `StateFile`, `request_stop` |
 | `paper.rs` | `run`: preflight → open/resume → sync history → rebuild by replay → live loop; `RunOptions`, `Outcome`, `Status` |
+| `watchdog.rs` | The watchdog's decisions, pure: incidents (paper heartbeat stale or failed, recorder stale), alert once on open and once on recovery, skip right after a sleep |
 | `tests/paper.rs` | End to end on fakes: journaling from the start, resume == uninterrupted run, offline days, gap backfill, stop, refusals |
 
 ## A run

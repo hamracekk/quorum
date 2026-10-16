@@ -154,6 +154,11 @@ pub struct Session {
     pub journaled_until: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
     pub end_reason: Option<String>,
+    /// The latest complete timestamp a daily summary was sent for, and the equity then.
+    #[serde(default)]
+    pub summarized_until: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub summary_equity: Option<f64>,
 }
 
 /// The latest state of a running (or ended) session, for `quorum paper status`.
