@@ -1,0 +1,12 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'risk'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'quorum-risk'
+  description: 'Risk process: the only approver of orders (envelope, loss halts, kill switch)'
+dependsOn:
+  - 'core'
+  - 'envelope'

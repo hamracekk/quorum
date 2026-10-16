@@ -11,5 +11,6 @@ dependsOn:
   - 'core'
   - 'bus'
   - 'envelope'
+  - 'risk'
   - 'slots'
   - 'journal'

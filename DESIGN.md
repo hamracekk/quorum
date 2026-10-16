@@ -311,6 +311,14 @@ the venues directly. It is the only component allowed to approve orders.
 - **Venue keys:** trade-only, never withdrawal, IP-restricted, stored in the secret store and
   readable only by execution.
 
+**Built (P3 slice 1, `crates/risk`):** `quorum risk run` approves every paper order over a Unix
+socket (`data/risk/risk.sock`); NATS replaces the socket when the processes move to the server.
+It checks the envelope (re-read per request), the slot's rung, venue, leverage, its own daily and
+total loss tracking, and the kill switch (`quorum risk halt|resume`); risk-reducing orders always
+pass; unreachable means no new risk. The book it judges is still the slot's report (from fills);
+reading positions from venues, per-position and correlation limits, liquidity caps and
+flattening on halt come with live execution.
+
 ---
 
 ## 10. Trade evaluator
@@ -491,7 +499,7 @@ Each phase ends with a measurable exit criterion, not a feature list.
 | **P0 Foundation** 🔄 | Repo, copy core/bus/journal/lab/risk from trader with history, envelope (paper only), slot model, NATS, Postgres, launchd services | trader's golden backtest reproduces bit for bit; crypto-spot slot paper-trades on the laptop and resumes cleanly after sleep |
 | **P1 Recorder + factors** 🔄 recorder ✅, price factors + study ✅, regime model ✅ | Forward recorder, PIT store, first factor families (price, structure, macro), regime model | 2 weeks of clean recorded data; each factor has an event-study report |
 | **P2 Second market** 🔄 multi-asset ETF research slot (Tiingo) ✅ | `equities` slot on IBKR paper (UCITS ETFs, stocks), trading calendars, equity data | Equity slot runs paper 4 weeks alongside crypto |
-| **P3 Allocator + risk process** 🔄 allocation study ✅ (risk parity + regime: drawdown 6–10% vs 35% crypto alone; strict exit not met: ETFs alone had the better later Sharpe), stress tests ✅ (book passes all 9; crypto alone fails covid 2020 and 2022 at the 15% account limit; ETFs alone fail a −30% gap) | Cross-slot allocator, separate risk process, brakes, stress tests | Combined walk-forward beats each slot alone on Sharpe and drawdown |
+| **P3 Allocator + risk process** 🔄 allocation study ✅ (risk parity + regime: drawdown 6–10% vs 35% crypto alone; strict exit not met: ETFs alone had the better later Sharpe), stress tests ✅ (book passes all 9; crypto alone fails covid 2020 and 2022 at the 15% account limit; ETFs alone fail a −30% gap), risk process ✅ slice 1 (separate process approves every paper order: envelope, leverage, daily/total loss halts, kill switch; Unix socket on the laptop, NATS with the server) | Cross-slot allocator, separate risk process, brakes, stress tests | Combined walk-forward beats each slot alone on Sharpe and drawdown |
 | **P4 Knowledge plane** 🔄 fetch + tiered Claude extraction + impact themes ✅ (scoring, priced-in next) | Tiered Claude extraction, impact map, priced-in check, prompt records | 4 weeks of extraction with a scored record per event kind |
 | **P5 Evaluator** | Case files, counterfactual tracking, meta-labeling (shadow first), Claude review (shadow first) | Meta model beats "always take" out of sample on ≥ 200 trades |
 | **P6 Execution + live-micro** | Move to a VPS, raise the envelope, EMS tactics, TCA, reconciliation, first slot to LiveMicro via the gate | 12 weeks live-micro with slippage inside 1.5× model and no reconciliation break |

@@ -18,7 +18,10 @@ change when its module map, invariants or extension steps change.
 - **Envelope is read-only to the system.** No code path, agent or MCP tool may write the envelope
   or raise capital, limits or a slot's maximum mode.
 - **Asymmetric decision rights.** Anything may reduce risk; only the allocator adds risk, and only
-  on evidence. The risk process is the only component that approves orders.
+  on evidence. The risk process (`quorum_risk`, its own OS process) is the only component that
+  approves orders: every paper order goes through `runner`'s `GatedBroker`, risk-reducing orders
+  always pass, and an unreachable process means no new risk. Verdicts are recorded per session
+  and replayed, never asked again.
 - **One engine.** Backtest, replay, paper and live go through `core::Engine`. Never add a second
   simulation loop. `core/tests/golden.rs` pins results bit for bit; change its constants only for
   an intended behaviour change and say so in the commit.
@@ -73,6 +76,8 @@ cargo run --release -p quorum-cli -- notify --test   # phone alert test (ntfy; t
 ./deploy/launchd/install-watchdog.sh        # watchdog: paper heartbeat + recorder, every 5 min
 cargo run --release -p quorum-cli -- news fetch | extract | list | status   # knowledge plane
 ./deploy/launchd/install-news.sh            # news service (`quorum news run`)
+cargo run --release -p quorum-cli -- risk status | halt --reason R | resume   # risk process, kill switch
+./deploy/launchd/install-risk.sh            # risk process (`quorum risk run`); install before slots
 cargo run --release -p quorum-cli -- research sync --slot crypto-spot   # long history → data/research/bars
 cargo run --release -p quorum-cli -- factors --slot crypto-spot   # factor study (IC, OOS, after costs)
 cargo run --release -p quorum-cli -- secrets status   # which API keys are in the keychain (never printed)

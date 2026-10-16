@@ -11,6 +11,7 @@ use quorum_core::fakes::{
 use quorum_core::{Bar, EventLog, InstrumentId, Journal, VenueId};
 use quorum_envelope::Envelope;
 use quorum_journal::SqliteJournal;
+use quorum_risk::fakes::{FakeGate, FakeMode};
 use quorum_runner::{Ports, RunOptions, RunnerError, SlotFiles, Status, request_stop, run};
 use quorum_slots::SlotConfig;
 
@@ -75,6 +76,7 @@ struct World {
     journal: Arc<SqliteJournal>,
     log: Arc<MemoryEventLog>,
     notes: Arc<MemoryNotifier>,
+    risk: Arc<FakeGate>,
 }
 
 impl World {
@@ -88,6 +90,7 @@ impl World {
             journal: Arc::new(SqliteJournal::in_memory().await.expect("journal")),
             log: Arc::new(MemoryEventLog::default()),
             notes: Arc::new(MemoryNotifier::default()),
+            risk: Arc::new(FakeGate::new(FakeMode::Allow)),
         }
     }
 
@@ -104,6 +107,7 @@ impl World {
             journal: self.journal.clone(),
             log: self.log.clone(),
             notifier: self.notes.clone(),
+            risk: self.risk.clone(),
         }
     }
 
@@ -522,4 +526,94 @@ async fn the_operator_hears_of_the_start_each_day_and_the_end() {
         .count();
     assert_eq!(days_now, 3, "day 32 is not summarized twice");
     assert!(again.iter().any(|n| n.title.ends_with("session resumed")));
+}
+
+#[tokio::test]
+async fn every_order_is_approved_by_the_risk_process_and_recorded() {
+    let w = World::new("gate").await;
+    let out = run(
+        &w.ports(30, live(30..40)),
+        &slot(),
+        &envelope(),
+        &w.options(day(30) + Duration::minutes(5)),
+        std::future::pending(),
+    )
+    .await
+    .expect("run");
+    let checks = w.risk.checks();
+    let fills = w.journal.fills(&out.session_id).await.expect("fills");
+    assert!(!fills.is_empty());
+    assert!(
+        checks.len() >= fills.len(),
+        "every fill was an approved order"
+    );
+    assert!(checks.iter().all(|c| c.slot == "crypto-spot"
+        && c.mode == quorum_envelope::Mode::Paper
+        && c.equity > 0.0));
+    let slot_files = SlotFiles::new(&w.data, &slot().id);
+    let recorded = std::fs::read_to_string(slot_files.verdicts()).expect("verdicts");
+    assert_eq!(recorded.lines().count(), checks.len());
+}
+
+#[tokio::test]
+async fn with_the_risk_process_down_nothing_adds_risk_and_the_operator_hears() {
+    let w = World::new("gate-down").await;
+    w.risk.set(FakeMode::Down);
+    let out = run(
+        &w.ports(30, live(30..40)),
+        &slot(),
+        &envelope(),
+        &w.options(day(30) + Duration::minutes(5)),
+        std::future::pending(),
+    )
+    .await
+    .expect("run");
+    assert!(
+        w.journal
+            .fills(&out.session_id)
+            .await
+            .expect("fills")
+            .is_empty()
+    );
+    assert!((out.equity - 10_000.0).abs() < 1e-9, "cash untouched");
+    assert!(w.notes.sent().iter().any(|n| {
+        n.severity == quorum_core::Severity::Critical
+            && n.title.contains("risk process unreachable")
+    }));
+}
+
+#[tokio::test]
+async fn replay_repeats_the_recorded_verdicts() {
+    // Refused while live: no positions.
+    let w = World::new("gate-replay").await;
+    w.risk
+        .set(FakeMode::RefuseIncreases("kill switch: drill".to_owned()));
+    let first = run(
+        &w.ports(30, live(30..35)),
+        &slot(),
+        &envelope(),
+        &w.options(day(30) + Duration::minutes(5)),
+        std::future::pending(),
+    )
+    .await
+    .expect("first run");
+    assert!((first.equity - 10_000.0).abs() < 1e-9);
+    let asked = w.risk.checks().len();
+    assert!(asked > 0);
+    // The kill switch is lifted, but the replayed days keep their refusals: the gate is not
+    // asked again about them, and the book is rebuilt exactly as it was.
+    w.risk.set(FakeMode::Allow);
+    let second = run(
+        &w.ports(35, Vec::new()),
+        &slot(),
+        &envelope(),
+        &w.options(day(35)),
+        std::future::pending(),
+    )
+    .await
+    .expect("resumed run");
+    assert!(second.resumed);
+    assert_eq!(second.journaled_until, first.journaled_until);
+    assert_eq!(w.risk.checks().len(), asked, "replay asked nothing");
+    assert!((second.equity - first.equity).abs() < 1e-9);
 }

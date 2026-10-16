@@ -4,12 +4,14 @@
 //! date, **rebuild by replay** (a fresh engine fed every stored bar; only bars past the
 //! session's journal watermark have their decisions journaled), then trade live closed bars,
 //! backfilling gaps and catching up on what the stream missed. Fills are simulated: the runner
-//! has no order path to a venue.
+//! has no order path to a venue. Every order is approved by the risk process first (see
+//! `gate`); its verdicts are recorded per session so replay repeats them.
 //!
 //! Files per slot live in `<data>/slots/<id>/` (see [`SlotFiles`]); bars, journal and event log
 //! go through the ports in [`Ports`], so tests run on fakes.
 
 mod build;
+mod gate;
 mod paper;
 mod session;
 pub mod watchdog;
@@ -32,6 +34,8 @@ pub struct Ports {
     pub log: Arc<dyn EventLog>,
     /// Alerts and daily summaries to the operator (best effort: never fails a run).
     pub notifier: Arc<dyn Notifier>,
+    /// The risk process, which approves every order (DESIGN §9).
+    pub risk: Arc<dyn quorum_risk::RiskGate>,
 }
 
 #[derive(Debug, thiserror::Error)]

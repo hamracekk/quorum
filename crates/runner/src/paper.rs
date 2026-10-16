@@ -10,13 +10,15 @@ use chrono::{DateTime, Duration, DurationRound, Utc};
 use futures_util::StreamExt;
 use quorum_bus::Bus;
 use quorum_core::{
-    Bar, Engine, EngineError, Event, InstrumentId, Notification, RunInfo, RunKind, Series, Severity,
+    Bar, Engine, EngineError, Event, InstrumentId, Notification, PaperBroker, RunInfo, RunKind,
+    Series, Severity,
 };
 use quorum_envelope::{Envelope, Mode};
 use quorum_slots::{Evidence, Gates, SlotConfig, SlotState, Transition, Universe};
 use serde::Serialize;
 
 use crate::build::{backtest_config, interval_duration, strategy};
+use crate::gate::GatedBroker;
 use crate::session::{Session, SlotFiles, StateFile};
 use crate::{Ports, Result, RunnerError};
 
@@ -99,7 +101,7 @@ pub async fn run(
     let files = SlotFiles::new(&options.data, &slot.id);
     files.create()?;
     let _lock = files.lock()?; // held until the run returns
-    preflight(ports, slot, envelope, &files, options.now)?;
+    let mode = preflight(ports, slot, envelope, &files, options.now)?.mode();
     let instruments = instruments(slot)?;
     let (session, resumed) = open_session(&files, slot, &instruments, options, step)?;
     if !resumed {
@@ -122,7 +124,22 @@ pub async fn run(
     let mut book = strategy(slot, instruments.len())?;
     let cfg = backtest_config(slot, envelope);
     let daily_limit = cfg.risk.max_daily_loss;
-    let engine = Engine::new(book.as_mut(), cfg, &instruments, Some(session.trade_from));
+    let venue = PaperBroker::new(cfg.fee_rate, cfg.slippage_bps).with_impact(cfg.impact);
+    let broker = GatedBroker::new(
+        Box::new(venue),
+        Arc::clone(&ports.risk),
+        &session,
+        mode,
+        cfg.initial_cash,
+        &files,
+    )?;
+    let engine = Engine::with_broker(
+        book.as_mut(),
+        cfg,
+        &instruments,
+        Some(session.trade_from),
+        Box::new(broker),
+    );
     let mut live = Live {
         ports,
         files,
@@ -137,6 +154,8 @@ pub async fn run(
         catch_up_every: options.catch_up_every,
         fills_since_summary: 0,
         daily_limit,
+        mode,
+        risk_down: false,
     };
     live.rebuild(&instruments, history).await?;
     let snapshot = live.engine.snapshot();
@@ -357,6 +376,10 @@ struct Live<'s> {
     fills_since_summary: usize,
     /// The engine's daily loss limit, for halt alerts.
     daily_limit: f64,
+    /// The slot's ladder rung, reported to the risk process.
+    mode: Mode,
+    /// The last heartbeat to the risk process failed (alerted once per outage).
+    risk_down: bool,
 }
 
 impl Live<'_> {
@@ -522,6 +545,7 @@ impl Live<'_> {
                         tracing::info!("stop requested");
                         return Ok(Status::Stopped);
                     }
+                    self.ping_risk().await;
                     self.catch_up().await?;
                     self.maybe_summary().await;
                     self.write_state("running", None)?;
@@ -536,6 +560,50 @@ impl Live<'_> {
                         self.write_state("running", None)?;
                     }
                 },
+            }
+        }
+    }
+
+    /// Tells the risk process the slot is alive and its equity; alerts once when it cannot be
+    /// reached (orders that add risk are refused meanwhile) and once when it is back.
+    async fn ping_risk(&mut self) {
+        let ping = quorum_risk::Ping {
+            slot: self.session.slot.as_str().to_owned(),
+            mode: self.mode,
+            equity: self.engine.snapshot().equity,
+        };
+        let gate = Arc::clone(&self.ports.risk);
+        let result = tokio::task::spawn_blocking(move || gate.ping(&ping))
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r.map_err(|e| e.to_string()));
+        match result {
+            Ok(halt) => {
+                if let Some(halt) = halt {
+                    tracing::info!(halt = %halt.describe(), "risk process: no new risk for this slot");
+                }
+                if self.risk_down {
+                    self.risk_down = false;
+                    self.note(
+                        Severity::Info,
+                        "risk process back",
+                        "orders are checked again",
+                    )
+                    .send()
+                    .await;
+                }
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "risk process unreachable");
+                if !self.risk_down {
+                    self.risk_down = true;
+                    let body = format!(
+                        "orders that add risk are refused until it is back; risk-reducing orders still pass · {err}"
+                    );
+                    self.note(Severity::Critical, "risk process unreachable", &body)
+                        .send()
+                        .await;
+                }
             }
         }
     }

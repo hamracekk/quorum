@@ -16,6 +16,7 @@ use crate::{Result, RunnerError};
 /// - `slot.json`: the slot's [`SlotState`] (ladder rung), outliving sessions.
 /// - `session.json`: the current or last [`Session`].
 /// - `state.json`: the latest [`StateFile`] for status displays.
+/// - `verdicts.jsonl`: the risk process's verdict on every order, so replay repeats them.
 /// - `STOP`: a request to stop the running session (resumable).
 /// - `LOCK`: held by the one process running the slot (released when it exits, crash included).
 #[derive(Debug, Clone)]
@@ -44,6 +45,11 @@ impl SlotFiles {
     #[must_use]
     pub fn state(&self) -> PathBuf {
         self.dir.join("state.json")
+    }
+
+    #[must_use]
+    pub fn verdicts(&self) -> PathBuf {
+        self.dir.join("verdicts.jsonl")
     }
 
     #[must_use]
