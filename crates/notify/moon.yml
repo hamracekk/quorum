@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+id: 'notify'
+layer: 'library'
+language: 'rust'
+stack: 'backend'
+tags: ['rust']
+project:
+  name: 'quorum-notify'
+  description: 'Operator notifications: ntfy phone alerts, log, best-effort fan-out'
+dependsOn:
+  - 'core'

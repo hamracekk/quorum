@@ -1,0 +1,13 @@
+# Operator notifications (crates/notify). Best effort: a failing channel is logged, never stops
+# trading. The log always gets everything.
+
+# Phone alerts through ntfy (free iOS/Android app). The TOPIC IS A SECRET — whoever knows it can
+# read the alerts — so it lives in the keychain, never here:
+#   quorum secrets set ntfy-topic     (a long random name, e.g. quorum-7f3k9q2xw8a1)
+#   quorum notify --test
+# and subscribe to the same topic in the ntfy app.
+[phone]
+enabled = true
+server = "https://ntfy.sh"
+# info: daily summaries too; warning: halts, stream ends, stale recorder; critical: failures.
+min_severity = "info"

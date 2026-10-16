@@ -1643,6 +1643,7 @@ dependencies = [
  "quorum-envelope",
  "quorum-journal",
  "quorum-lab",
+ "quorum-notify",
  "quorum-recorder",
  "quorum-runner",
  "quorum-slots",
@@ -1763,6 +1764,22 @@ dependencies = [
  "reqwest",
  "thiserror",
  "tokio",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
+name = "quorum-notify"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "quorum-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
  "tracing",
  "wiremock",
 ]
