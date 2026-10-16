@@ -184,3 +184,48 @@ fn non_conforming_answers_are_rejected_whole() {
         assert!(err.contains(expected), "{err} — {answer}");
     }
 }
+
+#[test]
+fn more_than_five_events_keep_the_strongest_five_and_a_runaway_answer_is_rejected() {
+    let symbols = [
+        "AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH", "III", "JJJ", "KKK",
+    ];
+    let many: Vec<(String, InstrumentId)> = symbols
+        .iter()
+        .map(|s| {
+            (
+                (*s).to_owned(),
+                InstrumentId::spot("binance", &format!("{s}USDT")).expect("valid"),
+            )
+        })
+        .collect();
+    let event = |asset: &str, magnitude: &str, confidence: f64| {
+        json!({
+            "asset": asset, "direction": "bullish", "magnitude": magnitude,
+            "confidence": confidence, "horizon": "days", "event_type": "macro",
+            "rationale": "test"
+        })
+    };
+    let answer = |events: Vec<Value>| json!({ "relevant": true, "events": events }).to_string();
+    let six = answer(vec![
+        event("AAA", "low", 0.9),
+        event("BBB", "high", 0.5),
+        event("CCC", "medium", 0.7),
+        event("DDD", "high", 0.8),
+        event("EEE", "medium", 0.6),
+        event("FFF", "low", 0.95),
+    ]);
+    let reading = parse(&six, &item("t", "s"), &many, "m", at(2)).expect("valid");
+    let kept: Vec<&str> = reading
+        .events
+        .iter()
+        .map(|e| e.instrument.symbol())
+        .collect();
+    assert_eq!(
+        kept,
+        ["DDDUSDT", "BBBUSDT", "CCCUSDT", "EEEUSDT", "FFFUSDT"]
+    );
+    let eleven = answer(symbols.iter().map(|s| event(s, "low", 0.5)).collect());
+    let err = parse(&eleven, &item("t", "s"), &many, "m", at(2)).expect_err("runaway");
+    assert!(err.contains("at most 10"), "{err}");
+}

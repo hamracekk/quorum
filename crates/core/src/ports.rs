@@ -471,6 +471,13 @@ pub trait PassiveBenchmark: Send + Sync + fmt::Debug {
     ) -> Result<Option<f64>, PortError>;
 }
 
+/// An extra line for the daily paper summary (e.g. the shadow evaluator's record). Best effort:
+/// `None` or an error leaves the line out.
+#[async_trait]
+pub trait DailyNote: Send + Sync + fmt::Debug {
+    async fn line(&self) -> Result<Option<String>, PortError>;
+}
+
 /// What produced a journaled run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

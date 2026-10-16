@@ -365,6 +365,22 @@ async fn passive(
     }
 }
 
+/// The extra summary lines, each on its own line; failures are logged and left out.
+async fn notes(notes: Vec<Arc<dyn quorum_core::DailyNote>>) -> String {
+    let mut out = String::new();
+    for note in notes {
+        match note.line().await {
+            Ok(Some(line)) => {
+                out.push('\n');
+                out.push_str(&line);
+            }
+            Ok(None) => {}
+            Err(err) => tracing::warn!(error = %err, "summary line unavailable"),
+        }
+    }
+    out
+}
+
 /// A notification on its way out.
 struct Outgoing(Arc<dyn quorum_core::Notifier>, Notification);
 
@@ -454,6 +470,7 @@ impl Live<'_> {
             latest + self.step,
         )
         .await;
+        let extra = notes(self.ports.notes.clone()).await;
         let snapshot = self.engine.snapshot();
         let capital = self.session.config.paper_capital;
         let before = self.session.summary_equity.unwrap_or(capital);
@@ -467,7 +484,7 @@ impl Live<'_> {
             Severity::Info,
             &format!("day {}", latest.date_naive()),
             &format!(
-                "equity {:.2} ({:+.2}% since the last summary, {:+.2}% since start{passive}) · {} positions, {:.0}% invested · {} fills{}",
+                "equity {:.2} ({:+.2}% since the last summary, {:+.2}% since start{passive}) · {} positions, {:.0}% invested · {} fills{}{extra}",
                 snapshot.equity,
                 ratio(snapshot.equity, before) * 100.0,
                 ratio(snapshot.equity, capital) * 100.0,

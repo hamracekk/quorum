@@ -344,6 +344,11 @@ async fn ports(slot: &SlotConfig, config: &Path, data: &Path) -> Result<Ports> {
             risk::paths(config, data).socket(),
         )),
         benchmark: benchmark::paper_benchmark(config),
+        notes: vec![Arc::new(evaluate::EvaluatorNote {
+            config: config.to_path_buf(),
+            data: data.to_path_buf(),
+            slot: slot.id.as_str().to_owned(),
+        })],
     })
 }
 
@@ -757,10 +762,16 @@ async fn watchdog(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
         let state = files.load_state()?.map(|s| (s.status, s.heartbeat));
         seen.push((id.clone(), state));
     }
+    let gate = quorum_risk::SocketGate::new(risk::paths(config, data).socket());
+    let risk_answered =
+        tokio::task::spawn_blocking(move || gate.request(&quorum_risk::Request::Status).is_ok())
+            .await
+            .ok();
     let observation = Observation {
         now: chrono::Utc::now(),
         slots: seen,
         recorder_last_write: last_write(&data.join("recorder")),
+        risk_answered,
     };
     let path = data.join("watchdog.json");
     let before: WatchState = std::fs::read_to_string(&path)

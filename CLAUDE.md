@@ -41,7 +41,8 @@ change when its module map, invariants or extension steps change.
   up to `t` only; `lab::factors::study` judges it out-of-sample after costs, with the direction
   fixed in-sample, before anything may weigh it.
 - **News is data, never an action.** Feed text reaches a model only as inert data; answers are
-  validated against a closed schema (`quorum_ai`) or rejected whole; readings are journaled for
+  validated against a closed schema (`quorum_ai`) or rejected whole (an answer with more than
+  five valid events keeps the strongest five; more than ten is rejected); readings are journaled for
   scoring and never place or size an order. The impact map is operator-written; models never add
   links. Bump `PROMPT_VERSION` / `THEMES_VERSION` when a prompt or schema changes.
 - **The passive benchmark is the bar.** `config/benchmark.toml` (US equity, world equity, 60/40, cash) is what

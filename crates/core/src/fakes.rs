@@ -381,6 +381,17 @@ impl crate::ports::PassiveBenchmark for FixedBenchmark {
     }
 }
 
+/// A summary line that is always the same.
+#[derive(Debug, Clone)]
+pub struct FixedNote(pub Option<String>);
+
+#[async_trait]
+impl crate::ports::DailyNote for FixedNote {
+    async fn line(&self) -> Result<Option<String>, PortError> {
+        Ok(self.0.clone())
+    }
+}
+
 /// Records every notification it is given.
 #[derive(Debug, Default)]
 pub struct MemoryNotifier {
