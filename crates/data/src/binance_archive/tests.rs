@@ -73,6 +73,7 @@ fn candidates_are_usdt_coins_not_currencies_or_leveraged_tokens() {
         "BTCBUSD",
         "ETHBTC",
         "UPUSDT",
+        "币安人生USDT",
         "BTCUSDT",
     ]
     .iter()

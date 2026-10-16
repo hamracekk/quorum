@@ -328,6 +328,9 @@ pub fn usdt_candidates(symbols: &[String]) -> Vec<String> {
         .iter()
         .filter_map(|s| {
             let base = s.strip_suffix("USDT")?;
+            if !base.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return None; // not a valid instrument symbol (e.g. a non-Latin name)
+            }
             let leveraged = LEVERAGED
                 .iter()
                 .any(|l| base.len() > l.len() + 1 && base.ends_with(l));

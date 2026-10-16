@@ -129,7 +129,8 @@ pub(crate) async fn run(config: &Path, data: &Path, slot: &str, source: Source) 
     )?;
 
     print(&report, slot.id.as_str(), source, cost);
-    if source == Source::History {
+    let survivors = matches!(slot.universe, quorum_slots::Universe::Fixed { .. });
+    if source == Source::History && survivors {
         println!(
             "History cases come from the slot's own strategy, whose settings were chosen on this \
              history, over today's surviving instruments: base rates are flattered."

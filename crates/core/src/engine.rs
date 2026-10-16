@@ -33,8 +33,8 @@ use crate::stops::{Atr, OpenTrade};
 use crate::strategy::Strategy;
 use crate::types::{Bar, EquityPoint, Fill};
 
-/// Two-bar spread estimates averaged per instrument (about a month of daily bars).
-const SPREAD_WINDOW: usize = 20;
+/// Bars of dollar volume behind a spread estimate (about a month of daily bars).
+const SPREAD_WINDOW: usize = 30;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum EngineError {

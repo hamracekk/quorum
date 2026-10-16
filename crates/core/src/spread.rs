@@ -1,41 +1,44 @@
-//! Bid-ask spread estimated from daily highs and lows (Corwin & Schultz, *J. Finance* 2012).
+//! Bid-ask spread estimated from trading volume: thin markets cost more to cross than a fixed
+//! slippage assumes, liquid ones less.
 //!
-//! The cost of crossing the spread grows as an instrument gets less liquid, which a fixed
-//! slippage hides. Point in time: an estimate uses the two bars up to the latest close.
+//! Calibrated 2026-10-16 on Binance spot: the median quoted spread of 25 USDT pairs (the
+//! recorder's book snapshots, one day) against their 24-hour dollar volume ($2M–$1.4B) fits
+//! `spread_bps = e^16.526 × volume^−0.946` (R² 0.63): ~0.4 bp at $100M a day, ~3.6 bp at $10M,
+//! ~32 bp at $1M. Below $2M it is an extrapolation; other venues need their own calibration.
+//!
+//! A high/low estimator (Corwin & Schultz) was tried first and rejected: on volatile daily bars it
+//! reads volatility as spread and put Binance pairs at ~1% where their books show 0.5–12 bp.
+//! Point in time: an estimate uses volumes up to the latest close.
 
 use std::collections::{BTreeMap, VecDeque};
 
 use crate::instrument::InstrumentId;
 use crate::types::Bar;
 
+/// `ln` of the calibration's scale (bp at $1 a day).
+const LN_SCALE: f64 = 16.526;
+/// The calibration's volume exponent.
+const EXPONENT: f64 = -0.946;
 /// The largest half-spread an estimate may report (5%).
 pub const MAX_HALF_SPREAD: f64 = 0.05;
 
-/// The full spread (as a fraction of price) implied by two consecutive bars.
-///
-/// `None` when their prices cannot give one; negative estimates (noise) are 0.
+/// Half the quoted spread (a fraction of price) of a market trading `daily_dollar_volume`.
 #[must_use]
-pub fn corwin_schultz(a: &Bar, b: &Bar) -> Option<f64> {
-    let ok = |bar: &Bar| bar.low > 0.0 && bar.high >= bar.low && bar.high.is_finite();
-    if !ok(a) || !ok(b) {
-        return None;
+pub fn half_spread(daily_dollar_volume: f64) -> f64 {
+    if !(daily_dollar_volume.is_finite() && daily_dollar_volume > 0.0) {
+        return MAX_HALF_SPREAD;
     }
-    let (ra, rb) = ((a.high / a.low).ln(), (b.high / b.low).ln());
-    let beta = ra.mul_add(ra, rb * rb);
-    let gamma = (a.high.max(b.high) / a.low.min(b.low)).ln().powi(2);
-    let k = 2.0_f64.mul_add(-std::f64::consts::SQRT_2, 3.0);
-    let alpha = ((2.0 * beta).sqrt() - beta.sqrt()) / k - (gamma / k).sqrt();
-    let spread = 2.0 * alpha.exp_m1() / (1.0 + alpha.exp());
-    spread.is_finite().then(|| spread.max(0.0))
+    let bps = EXPONENT.mul_add(daily_dollar_volume.ln(), LN_SCALE).exp();
+    (bps / 2.0 / 10_000.0).min(MAX_HALF_SPREAD)
 }
 
-/// Each instrument's half-spread: the mean of its last `window` two-bar estimates, capped at
-/// [`MAX_HALF_SPREAD`].
+/// Each instrument's half-spread from its mean daily dollar volume over the last `window` bars
+/// (bars of any interval, scaled to a day by their spacing).
 #[derive(Debug, Clone)]
 pub struct SpreadEstimator {
     window: usize,
-    last: BTreeMap<InstrumentId, Bar>,
-    recent: BTreeMap<InstrumentId, VecDeque<f64>>,
+    last_ts: BTreeMap<InstrumentId, chrono::DateTime<chrono::Utc>>,
+    daily: BTreeMap<InstrumentId, VecDeque<f64>>,
 }
 
 impl SpreadEstimator {
@@ -43,68 +46,72 @@ impl SpreadEstimator {
     pub fn new(window: usize) -> Self {
         Self {
             window: window.max(1),
-            last: BTreeMap::new(),
-            recent: BTreeMap::new(),
+            last_ts: BTreeMap::new(),
+            daily: BTreeMap::new(),
         }
     }
 
     /// Records `bar` and returns the instrument's half-spread estimate, once it has one.
     pub fn observe(&mut self, instrument: &InstrumentId, bar: &Bar) -> Option<f64> {
-        let previous = self.last.insert(instrument.clone(), *bar);
-        let recent = self.recent.entry(instrument.clone()).or_default();
-        if let Some(spread) = previous.and_then(|p| corwin_schultz(&p, bar)) {
-            recent.push_back(spread / 2.0);
-            if recent.len() > self.window {
-                recent.pop_front();
+        let previous = self.last_ts.insert(instrument.clone(), bar.ts);
+        let daily = self.daily.entry(instrument.clone()).or_default();
+        if let Some(previous) = previous {
+            let secs = (bar.ts - previous).num_seconds();
+            if secs > 0 {
+                let per_day = 86_400.0 / secs as f64;
+                daily.push_back(bar.close * bar.volume * per_day);
+                if daily.len() > self.window {
+                    daily.pop_front();
+                }
             }
         }
-        (!recent.is_empty())
-            .then(|| (recent.iter().sum::<f64>() / recent.len() as f64).min(MAX_HALF_SPREAD))
+        (!daily.is_empty()).then(|| half_spread(daily.iter().sum::<f64>() / daily.len() as f64))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use chrono::{Duration, TimeZone, Utc};
 
     use super::*;
 
-    fn bar(day: u32, high: f64, low: f64) -> Bar {
-        Bar {
-            ts: Utc
-                .with_ymd_and_hms(2025, 1, day, 0, 0, 0)
-                .single()
-                .expect("valid"),
-            open: low,
-            high,
-            low,
-            close: high,
-            volume: 1.0,
-        }
-    }
-
     #[test]
-    fn wider_daily_ranges_with_no_drift_imply_wider_spreads() {
-        // Same range both days and no move between them: the range is read as spread.
-        let tight = corwin_schultz(&bar(1, 100.2, 99.8), &bar(2, 100.2, 99.8)).expect("spread");
-        let wide = corwin_schultz(&bar(1, 102.0, 98.0), &bar(2, 102.0, 98.0)).expect("spread");
-        assert!(tight > 0.0 && wide > tight, "{tight} vs {wide}");
-        assert!(corwin_schultz(&bar(1, 1.0, 0.0), &bar(2, 1.0, 0.5)).is_none());
-    }
-
-    #[test]
-    fn the_estimate_averages_a_window_and_is_capped() {
-        let id = InstrumentId::spot("binance", "AUSDT").expect("valid");
-        let mut est = SpreadEstimator::new(3);
+    fn thinner_markets_cost_more_to_cross() {
+        let liquid = half_spread(1e8);
+        let thin = half_spread(1e6);
+        // ~0.4 bp and ~32 bp full spread at $100M and $1M a day.
+        let bps = |half: f64| half * 20_000.0;
+        assert!((bps(liquid) - 0.41).abs() < 0.05, "{liquid}");
+        assert!((bps(thin) - 31.8).abs() < 1.0, "{thin}");
         assert!(
-            est.observe(&id, &bar(1, 100.2, 99.8)).is_none(),
-            "one bar: nothing yet"
+            (half_spread(10.0) - MAX_HALF_SPREAD).abs() < 1e-12,
+            "capped"
         );
-        let first = est.observe(&id, &bar(2, 100.2, 99.8)).expect("estimate");
-        assert!(first > 0.0);
-        let mut crazy = SpreadEstimator::new(3);
-        crazy.observe(&id, &bar(1, 200.0, 50.0));
-        let capped = crazy.observe(&id, &bar(2, 200.0, 50.0)).expect("estimate");
-        assert!((capped - MAX_HALF_SPREAD).abs() < 1e-12);
+        assert!((half_spread(0.0) - MAX_HALF_SPREAD).abs() < 1e-12);
+    }
+
+    #[test]
+    fn volume_is_scaled_to_a_day_by_bar_spacing() {
+        let id = InstrumentId::spot("binance", "AUSDT").expect("valid");
+        let start = Utc
+            .with_ymd_and_hms(2025, 1, 1, 0, 0, 0)
+            .single()
+            .expect("valid");
+        // Hourly bars of $1M: $24M a day.
+        let bar = |h: i64| Bar {
+            ts: start + Duration::hours(h),
+            open: 1.0,
+            high: 1.0,
+            low: 1.0,
+            close: 1.0,
+            volume: 1e6,
+        };
+        let mut est = SpreadEstimator::new(30);
+        assert!(
+            est.observe(&id, &bar(0)).is_none(),
+            "spacing needs two bars"
+        );
+        let h = est.observe(&id, &bar(1)).expect("estimate");
+        assert!((h - half_spread(24e6)).abs() < 1e-15);
     }
 }
