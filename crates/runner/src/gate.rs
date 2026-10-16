@@ -167,6 +167,10 @@ impl Broker for GatedBroker {
         self.inner.liquidity(instrument, dollar_volume);
     }
 
+    fn spread(&mut self, instrument: &InstrumentId, half_spread: f64) {
+        self.inner.spread(instrument, half_spread);
+    }
+
     fn submit(&mut self, order: &Order) -> std::result::Result<(), PortError> {
         let verdict = self.verdict(order);
         if verdict.approved {

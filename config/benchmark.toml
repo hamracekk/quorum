@@ -15,6 +15,12 @@ summary = "60/40"
 # passive portfolios are taken as held over 3 years: tax-free. 0 turns the after-tax view off.
 trading_tax = 0.15
 
+# Compared in the investor's currency, at Czech National Bank fixings (the rates Czech tax uses):
+# exchange moves are part of the return and of the taxable gain. `fx_cost`: one conversion's cost
+# (in at the start, out at the end), e.g. ~0.15% at a retail broker.
+currency = "CZK"
+fx_cost = 0.0015
+
 [[portfolios]]
 name = "US equity"
 holdings = [{ instrument = "tiingo:SPY:equity", weight = 1.0 }]

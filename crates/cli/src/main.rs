@@ -251,9 +251,9 @@ async fn main() -> Result<ExitCode> {
         Command::Stress { slots } => {
             stress(&cli.config, &cli.data, &slots).map(|()| ExitCode::SUCCESS)
         }
-        Command::Allocate { slots } => {
-            allocate(&cli.config, &cli.data, &slots).map(|()| ExitCode::SUCCESS)
-        }
+        Command::Allocate { slots } => allocate(&cli.config, &cli.data, &slots)
+            .await
+            .map(|()| ExitCode::SUCCESS),
         Command::Regime { slot, horizon } => {
             regime(&cli.config, &cli.data, &slot, horizon).map(|()| ExitCode::SUCCESS)
         }
@@ -1046,7 +1046,7 @@ fn stress(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn allocate(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
+async fn allocate(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
     use quorum_lab::allocation::{AllocationConfig, study};
 
     let envelope = Envelope::load(&config.join("envelope.toml")).context("envelope")?;
@@ -1112,7 +1112,7 @@ fn allocate(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
         };
         println!("report: {}", save_report(data, name, &report)?.display());
         if daily_limit {
-            benchmark::compare_variants(config, data, &report.variants)?;
+            benchmark::compare_variants(config, data, &report.variants).await?;
         }
     }
     Ok(())

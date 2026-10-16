@@ -33,6 +33,9 @@ use crate::stops::{Atr, OpenTrade};
 use crate::strategy::Strategy;
 use crate::types::{Bar, EquityPoint, Fill};
 
+/// Two-bar spread estimates averaged per instrument (about a month of daily bars).
+const SPREAD_WINDOW: usize = 20;
+
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum EngineError {
     #[error("bar for {instrument} at {ts} arrived after {latest}; bars must be in time order")]
@@ -150,6 +153,8 @@ pub struct Engine<'s> {
     funding: BTreeMap<InstrumentId, std::collections::VecDeque<FundingPoint>>,
     /// Net funding paid so far (negative: received).
     funding_paid: f64,
+    /// Spread estimates for the broker, when `cfg.estimate_spread`.
+    spreads: Option<crate::spread::SpreadEstimator>,
 }
 
 impl<'s> Engine<'s> {
@@ -205,6 +210,9 @@ impl<'s> Engine<'s> {
             stamp_returns: Vec::new(),
             funding: BTreeMap::new(),
             funding_paid: 0.0,
+            spreads: cfg
+                .estimate_spread
+                .then(|| crate::spread::SpreadEstimator::new(SPREAD_WINDOW)),
             last_close: BTreeMap::new(),
             missed: BTreeMap::new(),
             seen: std::collections::BTreeSet::new(),
@@ -260,6 +268,13 @@ impl<'s> Engine<'s> {
         self.observe_bar(instrument, bar);
         // Known from this bar's close on: the next fills are sized against it.
         self.broker.liquidity(instrument, bar.close * bar.volume);
+        if let Some(half) = self
+            .spreads
+            .as_mut()
+            .and_then(|s| s.observe(instrument, bar))
+        {
+            self.broker.spread(instrument, half);
+        }
 
         if self.killed {
             return Ok(out);
@@ -987,6 +1002,7 @@ mod tests {
             fee_rate: 0.0,
             slippage_bps: 0.0,
             impact: 0.0,
+            estimate_spread: false,
             risk: RiskLimits {
                 max_daily_loss: 1.0,
                 ..RiskLimits::default()

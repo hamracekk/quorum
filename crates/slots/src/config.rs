@@ -147,6 +147,10 @@ pub struct CostModel {
     /// Square-root market impact coefficient (`core::backtest`); `0` = off.
     #[serde(default)]
     pub impact: f64,
+    /// Fills pay at least the spread estimated from recent highs and lows (`core::spread`);
+    /// for thin markets, where a fixed slippage flatters.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub estimate_spread: bool,
 }
 
 impl CostModel {
@@ -155,6 +159,7 @@ impl CostModel {
         cfg.fee_rate = self.fee_rate;
         cfg.slippage_bps = self.slippage_bps;
         cfg.impact = self.impact;
+        cfg.estimate_spread = self.estimate_spread;
     }
 }
 
