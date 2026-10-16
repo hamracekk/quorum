@@ -22,6 +22,7 @@ use quorum_recorder::{Feeds, RecordStore, RecorderConfig, record};
 use quorum_runner::{Ports, RunOptions, SlotFiles, request_stop, run};
 use quorum_slots::{SlotConfig, SlotId};
 
+mod news;
 mod secrets;
 
 #[derive(Debug, Parser)]
@@ -104,6 +105,11 @@ enum Command {
         /// Comma-separated slot ids to watch.
         #[arg(long, value_delimiter = ',', default_value = "crypto-spot")]
         slots: Vec<String>,
+    },
+    /// The knowledge plane: news feeds → typed events read by Claude (`config/news.toml`).
+    News {
+        #[command(subcommand)]
+        command: news::NewsCommand,
     },
     /// Research data, kept apart from what paper sessions replay.
     Research {
@@ -213,6 +219,9 @@ async fn main() -> Result<ExitCode> {
         Command::Backtest { slot, daily_loss } => {
             backtest(&cli.config, &cli.data, &slot, &daily_loss).map(|()| ExitCode::SUCCESS)
         }
+        Command::News { command } => news::run(&cli.config, &cli.data, command, shutdown_signal())
+            .await
+            .map(|()| ExitCode::SUCCESS),
         Command::Notify { test } => notify_test(&cli.config, test)
             .await
             .map(|()| ExitCode::SUCCESS),

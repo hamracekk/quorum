@@ -19,6 +19,7 @@ quorum stress                                   # stress gate per slot and for t
 quorum secrets set tiingo | ntfy-topic | status   # secrets in the macOS keychain (service quorum)
 quorum notify --test                            # phone alert test through ntfy
 quorum watchdog --slots crypto-spot             # one health check (launchd runs it every 5 min)
+quorum news fetch | extract | run | list | status   # knowledge plane (config/news.toml, impact.toml)
 ```
 
 Exit codes of `paper run`: `0` after a requested stop (Ctrl+C, SIGTERM, `paper stop`), `75`
