@@ -54,6 +54,7 @@ cargo run --release -p quorum-cli -- research sync --slot multi-asset --days 750
 cargo run --release -p quorum-cli -- factors --slot multi-asset --horizon 5
 cargo run --release -p quorum-cli -- regime --slot multi-asset                     # regime now + study → data/reports/
 cargo run --release -p quorum-cli -- backtest --slot crypto-spot --daily-loss 0.05   # slot strategy, paper settings
+cargo run --release -p quorum-cli -- allocate --slots crypto-spot,multi-asset      # cross-market allocation study
 ```
 
 Research slots span markets: `crypto-spot` (25 coins, Binance) and `multi-asset` (25 US ETFs

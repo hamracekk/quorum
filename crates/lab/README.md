@@ -10,12 +10,13 @@ loop here (M9).
 |---|---|
 | `lib.rs` | `StrategyFactory<P>` (any `Fn(&P) -> Box<dyn Strategy>`), `slice_all` helper |
 | `sweep.rs` | `sweep(grid, factory, series, cfg)`: backtest every parameter set, sorted by Sharpe |
+| `allocation.rs` | Cross-market allocation study (DESIGN §11, P3): slots' walk-forward curves combined as each alone, equal capital, risk parity, risk parity tilted by each market's regime; earlier vs later part; `beats_each_alone` = Sharpe and drawdown better than every slot in both parts |
 | `carry.rs` | ADR 0007: funding-carry simulation (long spot + short perpetual): coins whose trailing funding clears `min_annual`, equal notional, funding per print, both legs' costs, margin, 20% resize band; yearly returns; R-4 gate (four-leg cost hurdle, exit level), short-leg liquidation from bars, hold-out report |
 | `overfit.rs` | E-4: deflated Sharpe ratio (probability the best of many tried settings has a real edge), normal CDF and quantile |
 | `validation.rs` | R-3: probability of backtest overfitting (CSCV) and combinatorial purged cross-validation over each parameter set's full-history returns; run with every walk-forward |
 | `robustness.rs` | RB-2: seeded block bootstrap of an out-of-sample curve (CAGR, Sharpe, drawdown percentiles) and bull / bear / sideways splits by the benchmark's trailing quarter |
 | `parallel.rs` | `par_map`: an order-preserving parallel map over scoped threads (walk-forward windows, validation runs) |
-| `portfolio.rs` | ADR 0007 step 2: combine out-of-sample equity curves into one portfolio — daily returns aligned, fixed shares or capped inverse volatility from trailing data, rebalanced periodically; each stream alone and the correlation matrix |
+| `portfolio.rs` | ADR 0007 step 2: combine out-of-sample equity curves into one portfolio — daily returns aligned, fixed shares or capped inverse volatility from trailing data, rebalanced periodically; each stream alone and the correlation matrix; optional per-stream **tilts** (weight multipliers known the day before a rebalance), the rest held in cash |
 | `walk_forward.rs` | `walk_forward(...)`: rolling train/test windows, stitched out-of-sample `Report`; `walk_forward_with(...)` lets a parameter set also change the backtest config (per-trade stops chosen with the SMA pair) |
 | `signals.rs` | Event study: bias-signed forward returns (next open → close h bars later) per signal, baseline, net of costs, t-stat, in-sample vs out-of-sample, verdict |
 | `factors.rs` | Cross-sectional factor study (DESIGN §7.2): per rebalance date (every `horizon` bars, never overlapping) the Spearman IC of factor values vs forward returns (enter next open, exit `horizon` bars later) and the top quantile's excess over the universe net of turnover costs; direction from in-sample only; promising = in-sample \|t\| ≥ 3 (multiple testing), same sign out-of-sample with t ≥ 2, net excess > 0 |

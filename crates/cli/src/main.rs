@@ -77,6 +77,13 @@ enum Command {
         #[arg(long, default_value = "envelope")]
         daily_loss: String,
     },
+    /// Walk-forward each slot's strategy on its research history and study allocating across
+    /// them: each alone, equal capital, risk parity, risk parity tilted by regime.
+    Allocate {
+        /// Comma-separated slot ids.
+        #[arg(long, value_delimiter = ',', default_value = "crypto-spot,multi-asset")]
+        slots: Vec<String>,
+    },
     /// Research data, kept apart from what paper sessions replay.
     Research {
         #[command(subcommand)]
@@ -184,6 +191,9 @@ async fn main() -> Result<ExitCode> {
         }
         Command::Backtest { slot, daily_loss } => {
             backtest(&cli.config, &cli.data, &slot, &daily_loss).map(|()| ExitCode::SUCCESS)
+        }
+        Command::Allocate { slots } => {
+            allocate(&cli.config, &cli.data, &slots).map(|()| ExitCode::SUCCESS)
         }
         Command::Regime { slot, horizon } => {
             regime(&cli.config, &cli.data, &slot, horizon).map(|()| ExitCode::SUCCESS)
@@ -507,6 +517,161 @@ fn backtest(config: &Path, data: &Path, slot: &str, daily_loss: &str) -> Result<
         b.sharpe,
         b.max_drawdown * 100.0
     );
+    Ok(())
+}
+
+/// The slot with its strategy's lookback replaced.
+fn with_lookback(slot: &SlotConfig, lookback: usize) -> SlotConfig {
+    let mut slot = slot.clone();
+    slot.strategy = match slot.strategy {
+        quorum_slots::StrategySpec::TrendMomentum { .. } => {
+            quorum_slots::StrategySpec::TrendMomentum { lookback }
+        }
+        quorum_slots::StrategySpec::XsMomentum { top, rebalance, .. } => {
+            quorum_slots::StrategySpec::XsMomentum {
+                lookback,
+                top,
+                rebalance,
+            }
+        }
+    };
+    slot
+}
+
+const fn lookback_of(slot: &SlotConfig) -> usize {
+    match slot.strategy {
+        quorum_slots::StrategySpec::TrendMomentum { lookback }
+        | quorum_slots::StrategySpec::XsMomentum { lookback, .. } => lookback,
+    }
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "bars per year is a small positive number"
+)]
+const fn whole_bars(bars: f64) -> usize {
+    bars.round().max(1.0) as usize
+}
+
+/// One slot's walk-forward curve (lookback chosen per window on the year before) and its
+/// market's regime exposure per day, with or without the envelope's daily loss limit.
+fn slot_stream(
+    slot: &SlotConfig,
+    series: &[quorum_core::Series],
+    per_year: f64,
+    envelope: &Envelope,
+    daily_limit: bool,
+) -> Result<quorum_lab::allocation::SlotStream> {
+    use quorum_core::regime::{Regime, RegimeRule, regimes};
+    use quorum_lab::{WalkForwardConfig, walk_forward};
+
+    let n = series.len();
+    quorum_runner::strategy(slot, n)?; // the slot's own config builds: the grid's will too
+    let base = lookback_of(slot);
+    let mut grid: Vec<usize> = [base / 2, base, base * 3 / 2, base * 2]
+        .into_iter()
+        .filter(|l| *l > 0)
+        .collect();
+    grid.dedup();
+    let factory = |lookback: &usize| {
+        quorum_runner::strategy(&with_lookback(slot, *lookback), n)
+            .expect("same interval and kind as the slot config, which built")
+    };
+    let mut cfg = quorum_runner::backtest_config(slot, envelope);
+    if !daily_limit {
+        cfg.risk.max_daily_loss = 1.0;
+    }
+    let year = whole_bars(per_year);
+    let wf = WalkForwardConfig {
+        train_bars: year,
+        test_bars: (year / 4).max(1),
+    };
+    let report = walk_forward(&grid, &factory, series, &cfg, wf)
+        .with_context(|| format!("walk-forward {}", slot.id))?;
+    let exposure = |r: Regime| match r {
+        Regime::Trending => 1.0,
+        Regime::Choppy => 0.6,
+        Regime::RiskOff => 0.3,
+        Regime::Crisis => 0.0,
+    };
+    let regime_exposure = regimes(series, &RegimeRule::default(), year)
+        .into_iter()
+        .map(|p| (p.ts.date_naive(), exposure(p.regime)))
+        .collect();
+    Ok(quorum_lab::allocation::SlotStream {
+        name: slot.id.to_string(),
+        curve: report.curve,
+        regime_exposure,
+    })
+}
+
+fn allocate(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
+    use quorum_lab::allocation::{AllocationConfig, study};
+
+    let envelope = Envelope::load(&config.join("envelope.toml")).context("envelope")?;
+    let mut inputs = Vec::new();
+    for id in slots {
+        inputs.push(research_series(config, data, id)?);
+    }
+    for daily_limit in [true, false] {
+        let streams = inputs
+            .iter()
+            .map(|(slot, series, per_year)| {
+                slot_stream(slot, series, *per_year, &envelope, daily_limit)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let report = study(&streams, &AllocationConfig::default());
+        println!(
+            "\n== daily loss limit: {} · {} → {} (later part from {}) ==",
+            if daily_limit {
+                format!("envelope {:.0}%", envelope.loss().daily_max * 100.0)
+            } else {
+                "off".to_owned()
+            },
+            report.from.map_or_else(String::new, |d| d.to_string()),
+            report.to.map_or_else(String::new, |d| d.to_string()),
+            report
+                .later_from
+                .map_or_else(String::new, |d| d.to_string()),
+        );
+        println!(
+            "{:<24} {:>8} {:>7} {:>7}   {:>8} {:>7} {:>7}   weights",
+            "variant", "CAGR", "Sharpe", "max DD", "CAGR", "Sharpe", "max DD"
+        );
+        println!("{:<24} {:^24}   {:^24}", "", "earlier", "later");
+        for v in &report.variants {
+            let w: Vec<String> = v
+                .avg_weights
+                .iter()
+                .map(|(n, w)| format!("{n} {:.0}%", w * 100.0))
+                .collect();
+            println!(
+                "{:<24} {:>7.1}% {:>7.2} {:>6.0}%   {:>7.1}% {:>7.2} {:>6.0}%   {}",
+                v.name,
+                v.earlier.cagr * 100.0,
+                v.earlier.sharpe,
+                v.earlier.max_drawdown * 100.0,
+                v.later.cagr * 100.0,
+                v.later.sharpe,
+                v.later.max_drawdown * 100.0,
+                w.join(", ")
+            );
+        }
+        if let Some(c) = report.correlation.first().and_then(|r| r.get(1)) {
+            println!("correlation of daily returns: {c:.2}");
+        }
+        println!(
+            "regime-tilted risk parity beats every slot alone (Sharpe and drawdown, both parts): {}",
+            if report.beats_each_alone { "yes" } else { "no" }
+        );
+        let name = if daily_limit {
+            "allocation-envelope-limit"
+        } else {
+            "allocation-no-limit"
+        };
+        println!("report: {}", save_report(data, name, &report)?.display());
+    }
     Ok(())
 }
 
