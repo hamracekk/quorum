@@ -5,6 +5,7 @@
 //! Walk-forward is the honest number: parameters are chosen on a training window and
 //! judged only on the following window, which they have never seen.
 
+pub mod allocation;
 pub mod carry;
 mod error;
 pub mod factors;
