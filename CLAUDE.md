@@ -66,5 +66,6 @@ cargo run --release -p quorum-cli -- research sync --slot crypto-spot   # long h
 cargo run --release -p quorum-cli -- factors --slot crypto-spot   # factor study (IC, OOS, after costs)
 cargo run --release -p quorum-cli -- secrets status   # which API keys are in the keychain (never printed)
 cargo run --release -p quorum-cli -- regime --slot crypto-spot   # current regime + whether it helps
+cargo run --release -p quorum-cli -- backtest --slot crypto-spot --daily-loss off   # compare risk settings
 cargo run --release -p quorum-cli -- allocate   # walk-forward each slot, study allocating across them
 ```

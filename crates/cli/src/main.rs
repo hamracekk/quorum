@@ -68,6 +68,15 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         horizon: usize,
     },
+    /// Backtest a slot's configured strategy over its research history, with the costs and risk
+    /// settings paper uses (the daily loss limit can be overridden for comparison).
+    Backtest {
+        #[arg(long)]
+        slot: String,
+        /// Daily loss limit as a fraction (`0.05`), `envelope` (default) or `off`.
+        #[arg(long, default_value = "envelope")]
+        daily_loss: String,
+    },
     /// Walk-forward each slot's strategy on its research history and study allocating across
     /// them: each alone, equal capital, risk parity, risk parity tilted by regime.
     Allocate {
@@ -179,6 +188,9 @@ async fn main() -> Result<ExitCode> {
                 }
             }
             Ok(ExitCode::SUCCESS)
+        }
+        Command::Backtest { slot, daily_loss } => {
+            backtest(&cli.config, &cli.data, &slot, &daily_loss).map(|()| ExitCode::SUCCESS)
         }
         Command::Allocate { slots } => {
             allocate(&cli.config, &cli.data, &slots).map(|()| ExitCode::SUCCESS)
@@ -446,6 +458,66 @@ fn save_report(data: &Path, name: &str, report: &impl serde::Serialize) -> Resul
     std::fs::write(&path, serde_json::to_string_pretty(report)?)
         .with_context(|| format!("{}", path.display()))?;
     Ok(path)
+}
+
+fn backtest(config: &Path, data: &Path, slot: &str, daily_loss: &str) -> Result<()> {
+    let envelope = Envelope::load(&config.join("envelope.toml")).context("envelope")?;
+    let (slot, series, _) = research_series(config, data, slot)?;
+    let mut cfg = quorum_runner::backtest_config(&slot, &envelope);
+    cfg.risk.max_daily_loss = match daily_loss {
+        "envelope" => envelope.loss().daily_max,
+        "off" => 1.0,
+        value => value
+            .parse::<f64>()
+            .ok()
+            .filter(|v| *v > 0.0 && *v <= 1.0)
+            .with_context(|| {
+                format!("--daily-loss `{value}`: a fraction in (0, 1], envelope or off")
+            })?,
+    };
+    let mut strategy = quorum_runner::strategy(&slot, series.len())?;
+    let (result, events) = quorum_core::run_with_events(strategy.as_mut(), &series, &cfg, None);
+    let halts = events
+        .iter()
+        .filter(|e| matches!(e, quorum_core::Event::RiskHalt { .. }))
+        .count();
+    let report = &result.report;
+    let (s, b) = (&report.strategy, &report.benchmark);
+    let years = match (result.equity_curve.first(), result.equity_curve.last()) {
+        (Some(a), Some(z)) => (z.ts - a.ts).num_days() as f64 / 365.25,
+        _ => 0.0,
+    };
+    println!(
+        "{} · daily loss limit {} · {:.1} years",
+        slot.id,
+        if cfg.risk.max_daily_loss >= 1.0 {
+            "off".to_owned()
+        } else {
+            format!("{:.0}%", cfg.risk.max_daily_loss * 100.0)
+        },
+        years
+    );
+    println!(
+        "strategy    CAGR {:>6.1}%  Sharpe {:>5.2}  max DD {:>4.0}%  trades {:>5}  fees {:>8.0}  halts {} ({:.1}/yr)",
+        s.cagr * 100.0,
+        s.sharpe,
+        s.max_drawdown * 100.0,
+        report.trades,
+        report.fees,
+        halts,
+        if years > 0.0 {
+            halts as f64 / years
+        } else {
+            0.0
+        }
+    );
+    println!(
+        "buy & hold  CAGR {:>6.1}%  Sharpe {:>5.2}  max DD {:>4.0}%  (equal weight, no costs)",
+        b.cagr * 100.0,
+        b.sharpe,
+        b.max_drawdown * 100.0
+    );
+    Ok(())
 }
 
 /// The slot with its strategy's lookback replaced.

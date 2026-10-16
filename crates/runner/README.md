@@ -36,7 +36,7 @@ trader's paper daemon, scoped to a slot and its envelope.
   the engine past bars the others still miss, and those would be skipped as out of order
   (test `a_gap_in_the_stream_is_backfilled_in_order`).
 - **Paper only.** Fills come from the engine's `PaperBroker`; there is no order path to a venue.
-- **The envelope's daily loss limit** is the engine's kill switch for the day.
+- **The envelope's daily loss limit** is the engine's kill switch for the day, measured against the previous close (on daily bars: yesterday's close; on hourly bars the first hour counts). On daily crypto a 2% limit halts about 17 times a year and hurts (`quorum backtest --daily-loss`).
 - A stop leaves the session open; the next run resumes it.
 - **One process per slot.** A run holds `<data>/slots/<id>/LOCK` (an OS file lock, released on
   exit or crash); a second run of the same slot is refused.

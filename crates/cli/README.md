@@ -13,6 +13,7 @@ quorum paper stop --slot crypto-spot            # stop at the next heartbeat (re
 quorum record                                   # forward recorder (config/recorder.toml)
 quorum research sync --slot multi-asset --days 7500   # research history → data/research/bars
 quorum factors --slot multi-asset --horizon 5   # factor study → data/factors/
+quorum backtest --slot crypto-spot --daily-loss 0.05   # slot strategy over research history: CAGR, Sharpe, DD, halts
 quorum secrets set tiingo | status              # API keys in the macOS keychain (service quorum)
 ```
 

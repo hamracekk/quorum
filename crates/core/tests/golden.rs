@@ -2,9 +2,13 @@
 //! the same fills and equity, bit for bit. Refactors of execution (broker, orders, engine)
 //! must not change results; if this fails, the change altered trading behaviour.
 //!
-//! Last deliberate change (2026-10-13): orders are sized against the equity at the previous
-//! timestamp's close, not equity already marked at closes of the bar being filled (a small
-//! look-ahead that also made sizes depend on feed order).
+//! Last deliberate change (2026-10-16): the daily loss limit measures the day against the
+//! previous close, not against the day's first update — on daily bars the old reference made the
+//! loss always 0 (the kill switch never fired); on these hourly bars the first hour's move now
+//! counts too, so a few more days halt (278 → 266 fills).
+//!
+//! Before that (2026-10-13): orders are sized against the equity at the previous timestamp's
+//! close, not equity already marked at closes of the bar being filled.
 
 use chrono::{DateTime, Utc};
 use quorum_core::risk::RiskLimits;
@@ -61,11 +65,11 @@ fn execution_is_bit_for_bit_stable() {
             acc.rotate_left(7) ^ x.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15)
         });
     let last = result.equity_curve.last().expect("equity recorded").equity;
-    assert_eq!(result.fills.len(), 278);
+    assert_eq!(result.fills.len(), 266);
     assert_eq!(
         last.to_bits(),
-        4_664_890_379_710_536_963,
+        4_665_471_553_192_505_028,
         "final equity {last}"
     );
-    assert_eq!(fingerprint, 0xa5e9_2d8f_d963_dab8);
+    assert_eq!(fingerprint, 0x8876_fb9a_72ab_9755);
 }

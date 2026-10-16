@@ -115,7 +115,11 @@ impl Default for RiskLimits {
 pub struct RiskManager {
     limits: RiskLimits,
     day: Option<NaiveDate>,
+    /// The day's reference: equity at the previous close (the last update before the day
+    /// changed); the first update ever when there is none.
     day_open_equity: f64,
+    /// Equity at the latest update.
+    last_equity: Option<f64>,
     halted: bool,
     /// Equity at closed timestamps (for the drawdown peak).
     equity: VecDeque<f64>,
@@ -137,6 +141,7 @@ impl RiskManager {
             limits,
             day: None,
             day_open_equity: 0.0,
+            last_equity: None,
             halted: false,
             equity: VecDeque::new(),
             peak: 0.0,
@@ -223,14 +228,18 @@ impl RiskManager {
         }
     }
 
+    /// Records a closed timestamp's equity and checks the daily loss against the previous
+    /// close. With daily bars every update starts a new day, so the reference must be the last
+    /// equity before it, not this one (which made the loss always 0).
     pub fn update(&mut self, ts: DateTime<Utc>, equity: f64) {
         self.now = Some(ts);
         let day = ts.date_naive();
         if self.day != Some(day) {
             self.day = Some(day);
-            self.day_open_equity = equity;
+            self.day_open_equity = self.last_equity.unwrap_or(equity);
             self.halted = false;
         }
+        self.last_equity = Some(equity);
         if self.day_open_equity > 0.0
             && (self.day_open_equity - equity) / self.day_open_equity >= self.limits.max_daily_loss
         {
@@ -351,6 +360,37 @@ mod tests {
         risk.update(at(24), 940.0);
         assert!(!risk.halted());
         assert_close(risk.apply(&want)[&id("A")], 1.0);
+    }
+
+    /// Regression: with one update per day (daily bars) the day's reference used to be that
+    /// same update's equity, so the loss was always 0 and the kill switch never fired.
+    #[test]
+    fn daily_bars_halt_on_a_loss_against_the_previous_close() {
+        let limits = RiskLimits {
+            max_daily_loss: 0.02,
+            ..RiskLimits::default()
+        };
+        let mut risk = RiskManager::new(limits);
+        risk.update(at(0), 1_000.0);
+        assert!(!risk.halted());
+        risk.update(at(24), 975.0); // −2.5% from yesterday's close
+        assert!(risk.halted(), "a 2.5% daily loss must halt at a 2% limit");
+        risk.update(at(48), 975.0); // flat day: a new day, the halt lifts
+        assert!(!risk.halted());
+        risk.update(at(72), 960.0); // −1.5%: below the limit
+        assert!(!risk.halted());
+    }
+
+    #[test]
+    fn the_first_hour_of_a_day_counts_against_the_previous_close() {
+        let limits = RiskLimits {
+            max_daily_loss: 0.05,
+            ..RiskLimits::default()
+        };
+        let mut risk = RiskManager::new(limits);
+        risk.update(at(23), 1_000.0); // yesterday's last hour
+        risk.update(at(24), 940.0); // today's first hour: −6% from yesterday's close
+        assert!(risk.halted());
     }
 
     #[test]
