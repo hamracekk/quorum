@@ -44,9 +44,10 @@ change when its module map, invariants or extension steps change.
   validated against a closed schema (`quorum_ai`) or rejected whole; readings are journaled for
   scoring and never place or size an order. The impact map is operator-written; models never add
   links. Bump `PROMPT_VERSION` / `THEMES_VERSION` when a prompt or schema changes.
-- **The passive benchmark is the bar.** `config/benchmark.toml` (US equity, 60/40, cash) is what
+- **The passive benchmark is the bar.** `config/benchmark.toml` (US equity, world equity, 60/40, cash) is what
   the same money makes by holding index funds; `quorum allocate` compares every variant with it
-  (after costs, corrected for the comparisons made) and the daily summary shows it. Nothing earns
+  (after costs, before and after the slots' tax, corrected for the comparisons made) and the daily
+  summary shows it. Nothing earns
   live capital without beating it out of sample.
 - **The evaluator is shadow until it earns weight.** `quorum_evaluator` builds case files and
   labels every proposed entry, taken or not; nothing it computes reaches a target, order or size

@@ -9,7 +9,7 @@ use chrono::{DateTime, Duration, Utc};
 use quorum_core::{MarketData as _, PassiveBenchmark, PortError, Series};
 use quorum_data::tiingo::TiingoDaily;
 use quorum_lab::allocation::Variant;
-use quorum_lab::benchmark::{BenchmarkConfig, Portfolio, Verdict, compare, curve};
+use quorum_lab::benchmark::{BenchmarkConfig, Portfolio, Verdict, after_tax, compare, curve};
 use quorum_lab::overfit::normal_quantile;
 
 use crate::secrets;
@@ -22,34 +22,63 @@ fn side_cost(slot: &quorum_slots::SlotConfig) -> f64 {
     slot.costs.fee_rate + slot.costs.slippage_bps / 10_000.0
 }
 
-/// Compares every variant with every benchmark on the dates both cover, prints the table and
-/// saves the report.
+/// Compares every variant with every benchmark on the dates both cover, before and (with a
+/// `trading_tax`) after the trading book's tax, prints the tables and saves the report.
 pub(crate) fn compare_variants(config: &Path, data: &Path, variants: &[Variant]) -> Result<()> {
     let cfg = BenchmarkConfig::load(&config.join("benchmark.toml")).context("benchmark config")?;
     let (slot, series, _) = crate::research_series(config, data, &cfg.slot)?;
     let cost = side_cost(&slot);
-    let trials = (variants.len() * cfg.portfolios.len()).max(1);
+    let mut views = vec![("before tax".to_owned(), 0.0)];
+    if cfg.trading_tax > 0.0 {
+        views.push((
+            format!(
+                "after {:.0}% tax on each year's trading gain; passive held 3+ years is tax-free",
+                cfg.trading_tax * 100.0
+            ),
+            cfg.trading_tax,
+        ));
+    }
+    let trials = (variants.len() * cfg.portfolios.len() * views.len()).max(1);
     // Two-sided, Bonferroni across every comparison made here.
     let t_threshold = normal_quantile(1.0 - 0.025 / trials as f64);
-    let mut rows = Vec::new();
-    for portfolio in &cfg.portfolios {
-        let bench = curve(portfolio, &series, 10_000.0, cost)
-            .with_context(|| format!("benchmark `{}`", portfolio.name))?;
-        for v in variants {
-            if let Some(c) = compare(
-                (&v.name, &v.curve),
-                (&portfolio.name, &bench),
-                0.3,
-                YEAR,
-                t_threshold,
-            ) {
-                rows.push(c);
+    let benches = cfg
+        .portfolios
+        .iter()
+        .map(|p| {
+            curve(p, &series, 10_000.0, cost)
+                .map(|c| (p.name.as_str(), c))
+                .with_context(|| format!("benchmark `{}`", p.name))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut report = Vec::new();
+    for (label, tax) in &views {
+        let mut rows = Vec::new();
+        for (name, bench) in &benches {
+            for v in variants {
+                let subject = after_tax(&v.curve, *tax);
+                if let Some(c) = compare((&v.name, &subject), (name, bench), 0.3, YEAR, t_threshold)
+                {
+                    rows.push(c);
+                }
             }
         }
+        print_rows(
+            &format!(
+                "vs passive benchmarks, after costs, {label} (|t| ≥ {t_threshold:.2} across {trials} comparisons)"
+            ),
+            &rows,
+        );
+        report.push(serde_json::json!({ "view": label, "tax": tax, "rows": rows }));
     }
     println!(
-        "\n== vs passive benchmarks (after costs, before tax; |t| ≥ {t_threshold:.2} across {trials} comparisons) =="
+        "report: {}",
+        crate::save_report(data, "benchmark", &report)?.display()
     );
+    Ok(())
+}
+
+fn print_rows(title: &str, rows: &[quorum_lab::benchmark::Comparison]) {
+    println!("\n== {title} ==");
     println!(
         "{:<24} {:<24} {:>7} {:>7} {:>7} {:>7} {:>7} {:>7} {:>8} {:>6}  verdict",
         "variant",
@@ -63,7 +92,7 @@ pub(crate) fn compare_variants(config: &Path, data: &Path, variants: &[Variant])
         "1y wins",
         "t"
     );
-    for c in &rows {
+    for c in rows {
         println!(
             "{:<24} {:<24} {:>6.1}% {:>6.1}% {:>7.2} {:>7.2} {:>6.0}% {:>6.0}% {:>8} {:>6.2}  {}",
             c.subject,
@@ -84,14 +113,6 @@ pub(crate) fn compare_variants(config: &Path, data: &Path, variants: &[Variant])
             }
         );
     }
-    println!(
-        "Before tax: in CZ a passive fund held over 3 years is tax-free; quorum's trading is not."
-    );
-    println!(
-        "report: {}",
-        crate::save_report(data, "benchmark", &rows)?.display()
-    );
-    Ok(())
 }
 
 /// The summary benchmark priced from Tiingo end-of-day data.

@@ -143,3 +143,37 @@ fn the_same_curve_is_not_significant() {
     assert!(c.t.abs() < 1e-12);
     assert!(compare(("book", &bench[..1]), ("b", &bench), 0.3, 252, 2.0).is_none());
 }
+
+#[test]
+fn tax_takes_a_share_of_each_winning_year_only() {
+    let at = |y: i32| {
+        Utc.with_ymd_and_hms(y, 12, 31, 0, 0, 0)
+            .single()
+            .expect("valid")
+    };
+    let pre = vec![
+        EquityPoint {
+            ts: at(2020) - Duration::days(364),
+            equity: 100.0,
+        },
+        EquityPoint {
+            ts: at(2020),
+            equity: 120.0,
+        },
+        EquityPoint {
+            ts: at(2021),
+            equity: 90.0,
+        },
+        EquityPoint {
+            ts: at(2022),
+            equity: 99.0,
+        },
+    ];
+    let post = after_tax(&pre, 0.15);
+    // 2020: +20 → 3 tax → 117. 2021: −25% → 87.75, no tax. 2022: +10% → 96.525, tax 15% of
+    // the gain → 95.20875.
+    assert!((post[1].equity - 117.0).abs() < 1e-9);
+    assert!((post[2].equity - 87.75).abs() < 1e-9);
+    assert!((post[3].equity - 95.208_75).abs() < 1e-9);
+    assert_eq!(after_tax(&pre, 0.0), pre);
+}
