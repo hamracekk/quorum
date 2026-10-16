@@ -27,6 +27,9 @@ change when its module map, invariants or extension steps change.
   duplicate a decision. Gaps are backfilled for every instrument together, in time order.
 - **Research data never goes in the paper store.** Paper sessions replay their whole store;
   research history lives in `data/research/`.
+- **Notifications are best effort.** Send through the `Notifier` port (the CLI builds a
+  `Fanout`); a failing channel is logged, never fails a run. Never put a secret or external text
+  in a message; the ntfy topic lives only in the keychain.
 - **The CLI is the composition root** and the only place that names concrete adapters; logic
   lives in library crates.
 - **No look-ahead, point in time.** A decision on bar `t` uses only data known at the close of
@@ -62,6 +65,8 @@ cargo run --release -p quorum-cli -- paper stop --slot crypto-spot
 ./deploy/launchd/install.sh crypto-spot     # run it under launchd (deploy/README.md)
 cargo run --release -p quorum-cli -- record   # forward recorder (config/recorder.toml)
 ./deploy/launchd/install-recorder.sh        # the recorder under launchd
+cargo run --release -p quorum-cli -- notify --test   # phone alert test (ntfy; topic in the keychain)
+./deploy/launchd/install-watchdog.sh        # watchdog: paper heartbeat + recorder, every 5 min
 cargo run --release -p quorum-cli -- research sync --slot crypto-spot   # long history → data/research/bars
 cargo run --release -p quorum-cli -- factors --slot crypto-spot   # factor study (IC, OOS, after costs)
 cargo run --release -p quorum-cli -- secrets status   # which API keys are in the keychain (never printed)

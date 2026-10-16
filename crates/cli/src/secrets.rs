@@ -11,8 +11,12 @@ use anyhow::{Result, bail};
 const SERVICE: &str = "quorum";
 /// Tiingo API key: US stock and ETF end-of-day bars, read only.
 pub(crate) const TIINGO: &str = "tiingo";
+/// ntfy topic for phone alerts: a secret, since whoever knows it can read them.
+pub(crate) const NTFY_TOPIC: &str = "ntfy-topic";
+/// Optional access token for a protected or self-hosted ntfy server.
+pub(crate) const NTFY_TOKEN: &str = "ntfy-token";
 /// Every secret `quorum secrets` manages.
-pub(crate) const KNOWN: [&str; 1] = [TIINGO];
+pub(crate) const KNOWN: [&str; 3] = [TIINGO, NTFY_TOPIC, NTFY_TOKEN];
 
 /// The secret for `account`, if stored.
 pub(crate) fn get(account: &str) -> Option<String> {

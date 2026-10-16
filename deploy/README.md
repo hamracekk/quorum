@@ -28,6 +28,19 @@ tail -f ~/Library/Logs/quorum/paper-crypto-spot.log
 
 Every restart resumes the open session by replay, so nothing is lost or journaled twice.
 
+### The watchdog
+
+`com.quorum.watchdog` runs `quorum watchdog --slots <slots>` at login and every 5 minutes. It
+alerts (config/notify.toml) when a paper session is `running` but its heartbeat is older than
+5 minutes, when a session `failed`, or when the recorder wrote nothing for 15 minutes — once when
+it breaks, once when it recovers (state in `data/watchdog.json`). Right after a sleep it only
+records the time. Read-only: it never starts, stops or trades anything.
+
+```bash
+./deploy/launchd/install-watchdog.sh crypto-spot
+./deploy/launchd/uninstall-watchdog.sh
+```
+
 ### The forward recorder
 
 `com.quorum.recorder` runs `quorum record` (`config/recorder.toml`) the same way: started at
