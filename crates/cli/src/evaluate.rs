@@ -185,6 +185,23 @@ fn print(report: &EvaluatorStudy, slot: &str, source: Source, cost: f64) {
         );
     }
     println!(
+        "regime skips (skip a regime's entries if they lost in sample; judged on the later part):"
+    );
+    for r in &report.regime_skips {
+        println!(
+            "  skip {:<10} in {:>4} cases {:>6.2}% · out {:>4} cases {:>6.2}% (t {:>5.2}) · always take {:>5.2}% → with the skip {:>5.2}%  {:?}",
+            r.regime.map_or("unlabelled", |g| g.as_str()),
+            r.n_in,
+            r.mean_in * 100.0,
+            r.n_out,
+            r.mean_out * 100.0,
+            r.t_out,
+            r.always_out * 100.0,
+            r.skipping_out * 100.0,
+            r.verdict
+        );
+    }
+    println!(
         "features ({} tested; out of sample z ≥ {:.2} to separate winners at the exit):",
         report.features_tested, report.z_threshold
     );

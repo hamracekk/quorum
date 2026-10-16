@@ -86,6 +86,35 @@ pub struct RegimeRow {
     pub mean_net: f64,
 }
 
+/// The rule "skip entries in this regime", chosen in sample and judged out of sample.
+#[derive(Debug, Clone, Serialize)]
+pub struct RegimeSkip {
+    pub regime: Option<Regime>,
+    pub n_in: usize,
+    pub mean_in: f64,
+    pub n_out: usize,
+    /// Mean net of the out-of-sample entries the rule would have skipped.
+    pub mean_out: f64,
+    /// "Always take" out of sample, and with the rule applied.
+    pub always_out: f64,
+    pub skipping_out: f64,
+    /// t of the skipped entries' out-of-sample mean (negative: they lost).
+    pub t_out: f64,
+    pub verdict: SkipVerdict,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SkipVerdict {
+    /// The regime's entries lost in sample and lost out of sample beyond the threshold.
+    Holds,
+    /// Chosen in sample, but out of sample the loss is not significant (or there was none).
+    NotSignificant,
+    /// The regime's entries did not lose in sample: no rule to test.
+    NotChosen,
+    TooFew,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct EvaluatorStudy {
     pub cases: usize,
@@ -96,6 +125,8 @@ pub struct EvaluatorStudy {
     /// Strongest out-of-sample separation first.
     pub features: Vec<FeatureRow>,
     pub regimes: Vec<RegimeRow>,
+    /// One per regime seen; the threshold is corrected for how many were tested.
+    pub regime_skips: Vec<RegimeSkip>,
     pub features_tested: usize,
     /// One-sided z a feature needs out of sample (Bonferroni over `features_tested`).
     pub z_threshold: f64,
@@ -171,6 +202,8 @@ pub fn study(cases: &[Case], cfg: &StudyConfig) -> EvaluatorStudy {
         })
         .collect();
 
+    let regime_skips = regime_skips(in_sample, out_sample, cfg);
+
     EvaluatorStudy {
         cases: cases.len(),
         labelled: labelled.len(),
@@ -178,9 +211,74 @@ pub fn study(cases: &[Case], cfg: &StudyConfig) -> EvaluatorStudy {
         baseline,
         features,
         regimes,
+        regime_skips,
         features_tested: names.len(),
         z_threshold,
     }
+}
+
+/// For each regime: skip its entries if they lost in sample, then judge that out of sample.
+fn regime_skips(
+    in_sample: &[(&Case, f64)],
+    out_sample: &[(&Case, f64)],
+    cfg: &StudyConfig,
+) -> Vec<RegimeSkip> {
+    let regimes: std::collections::BTreeSet<Option<Regime>> = in_sample
+        .iter()
+        .chain(out_sample)
+        .map(|(c, _)| c.regime)
+        .collect();
+    let threshold = normal_quantile(1.0 - cfg.alpha / regimes.len().max(1) as f64);
+    let always_out = mean(&out_sample.iter().map(|(_, r)| *r).collect::<Vec<_>>());
+    regimes
+        .into_iter()
+        .map(|regime| {
+            let of = |xs: &[(&Case, f64)]| -> Vec<f64> {
+                xs.iter()
+                    .filter(|(c, _)| c.regime == regime)
+                    .map(|(_, r)| *r)
+                    .collect()
+            };
+            let (a, b) = (of(in_sample), of(out_sample));
+            let kept: Vec<f64> = out_sample
+                .iter()
+                .filter(|(c, _)| c.regime != regime)
+                .map(|(_, r)| *r)
+                .collect();
+            let t_out = t_stat(&b);
+            let verdict = if a.len() < cfg.min_class || b.len() < cfg.min_class {
+                SkipVerdict::TooFew
+            } else if mean(&a) >= 0.0 {
+                SkipVerdict::NotChosen
+            } else if t_out <= -threshold {
+                SkipVerdict::Holds
+            } else {
+                SkipVerdict::NotSignificant
+            };
+            RegimeSkip {
+                regime,
+                n_in: a.len(),
+                mean_in: mean(&a),
+                n_out: b.len(),
+                mean_out: mean(&b),
+                always_out,
+                skipping_out: mean(&kept),
+                t_out,
+                verdict,
+            }
+        })
+        .collect()
+}
+
+/// t of the mean of `xs` against zero; 0 with fewer than two values or no dispersion.
+fn t_stat(xs: &[f64]) -> f64 {
+    if xs.len() < 2 {
+        return 0.0;
+    }
+    let m = mean(xs);
+    let n = xs.len() as f64;
+    let sd = (xs.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (n - 1.0)).sqrt();
+    if sd > 0.0 { m / sd * n.sqrt() } else { 0.0 }
 }
 
 /// How many of `n` time-ordered cases are in sample.

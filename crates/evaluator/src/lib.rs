@@ -11,4 +11,4 @@ pub mod case;
 pub mod study;
 
 pub use case::{Case, CaseConfig, EXIT, HORIZONS, cases};
-pub use study::{EvaluatorStudy, StudyConfig, Verdict, study};
+pub use study::{EvaluatorStudy, RegimeSkip, SkipVerdict, StudyConfig, Verdict, study};
