@@ -447,6 +447,7 @@ budget each.
   data staleness and loss thresholds.
 - **Secrets:** the macOS keychain on the laptop, a secret store on the server; venue keys
   trade-only and IP-restricted.
+- **Apple app (§21)** is the main client; the web dashboard stays a fallback.
 - **Dashboard:** portfolio, slots and their rung, open trades with their case files, verdicts and
   counterfactuals, factor and strategy records, agents, envelope (read-only), kill switch.
 - **Daily brief:** one page to the phone: P&L, positions and why, what the evaluator rejected,
@@ -483,6 +484,7 @@ quorum/
 │   ├── mcp/           # MCP server
 │   └── api/           # dashboard API
 ├── apps/dashboard/    # web UI
+├── apps/apple/        # SwiftUI app for iPhone, iPad and Mac (§21)
 ├── config/            # envelope (signed), slots, factors, impact map
 ├── deploy/            # systemd units, compose for side services
 └── docs/adr/
@@ -592,3 +594,48 @@ ISIN, rebalance bands), rules for contributions and band rebalancing that prefer
 and a quarterly **AI review** of the holdings that only proposes changes (with their tax cost),
 is journaled and scored against "keep the policy unchanged". The risk process still approves every
 order. Evidence, Czech tax notes and the full sketch: [docs/long-term-investing.md](docs/long-term-investing.md).
+
+---
+
+## 21. Apple app (planned, 2026-10-16)
+
+The operator's main window onto quorum: a native **SwiftUI** app for iPhone, iPad and Mac
+(`apps/apple/`, one multiplatform target), designed for this purpose rather than a generic
+dashboard. It shows trades and investments and lets the operator **talk to the AI about them**.
+
+**What it shows**
+- **Home:** total equity in CZK and per book (trading slots, long-term book §20), today's change,
+  the passive benchmark over the same period (before and after tax), open incidents.
+- **Slots:** rung on the ladder, equity curve, positions and weights, risk status and halts.
+- **Trades:** every fill with its **case file** (§10: factors, regime, news readings at the time,
+  the evaluator's verdict) and how it turned out, beside the counterfactuals that were not taken.
+- **Investments (long-term book):** holdings, lots with their 3-year tax clock, drift from the
+  policy, and the AI review's proposals with their tax cost.
+- **News:** readings per instrument and theme, with how each kind of event has scored.
+- **Research:** factor, regime, evaluator and benchmark studies, as charts (Swift Charts).
+
+**Talking to the AI**
+- A chat on any object — a trade, a position, a slot, a proposal, a day — with the object's
+  journaled data attached as context ("why was this bought?", "what would selling cost in tax?",
+  "how did similar cases turn out?").
+- Answers come from Claude with **read-only tools** over the journal, studies and records; every
+  answer cites the records it used. The AI explains and proposes; it never trades.
+- Operator decisions made in the app (accept or decline a long-term proposal) are journaled and
+  scored like everything else.
+
+**Rules it keeps**
+- **Asymmetric rights hold in the app:** the kill switch (halt a slot or everything) is one tap;
+  resuming, accepting proposals and anything that adds risk need device authentication (Face ID
+  / passkey) and are journaled. The envelope is never edited from the app.
+- **No secrets on the device.** The app talks only to quorum's `api` process over HTTPS (on the
+  server; to the laptop through a private network such as Tailscale), authenticated with a
+  passkey. Claude and venue keys stay on the server.
+- **Data contract:** a versioned read API (JSON) plus a live stream (server-sent events) for
+  equity, fills, incidents and chat replies; the app keeps an offline cache.
+- **Notifications:** Apple push replaces ntfy for alerts and the daily summary once the server
+  exists; tapping one opens the object it is about.
+
+**Prerequisites:** the `api` process (P6, with the server move), the journal reads it serves, and
+an Apple developer account for push and distribution (TestFlight first). Built after the trading
+work and alongside the long-term book.
+
