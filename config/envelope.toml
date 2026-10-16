@@ -9,8 +9,10 @@ capital_total = 0
 leverage_max = 1.0
 
 # Venues quorum may trade on, paper included. Binance supplies crypto data and paper fills;
-# its EU/CZ status must be confirmed before it can carry real money (§19.1).
-venues_allowed = ["binance"]
+# its EU/CZ status must be confirmed before it can carry real money (§19.1). Tiingo is a price
+# source, not a broker: allowed for paper only (operator decision 2026-10-16), so the ETF slot
+# trades simulated fills on end-of-day prices until IBKR replaces it.
+venues_allowed = ["binance", "tiingo"]
 
 # Fractions of equity. Enforced in paper too, so the limits are tested before money is at risk.
 # Daily 5% (operator decision 2026-10-16): on daily crypto 2% halted 17 times a year and hurt

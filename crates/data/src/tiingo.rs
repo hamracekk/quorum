@@ -202,5 +202,141 @@ impl MarketData for TiingoDaily {
     }
 }
 
+/// When the first daily bar after `last` can be fetched: the next weekday's bar, once that UTC
+/// day is over (US exchanges trade on weekdays; holidays just find nothing new).
+#[must_use]
+pub fn next_bar_ready(last: DateTime<Utc>) -> DateTime<Utc> {
+    use chrono::Datelike as _;
+    let mut day = last.date_naive() + TimeDelta::days(1);
+    while matches!(day.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun) {
+        day += TimeDelta::days(1);
+    }
+    (day + TimeDelta::days(1))
+        .and_time(chrono::NaiveTime::MIN)
+        .and_utc()
+}
+
+/// End-of-day bars as a [`MarketStream`]: polls Tiingo once a new trading day can be complete
+/// and yields every instrument's new bars, in time order and in the order subscribed within a
+/// day.
+///
+/// Mindful of Tiingo's free limits (50 requests an hour): it sleeps until the next weekday's bar
+/// can exist, asks the first instrument first and fetches the rest only once that one has a new
+/// bar; on a holiday it asks once an hour.
+#[derive(Debug, Clone)]
+pub struct TiingoStream {
+    source: std::sync::Arc<TiingoDaily>,
+    poll: Duration,
+}
+
+impl TiingoStream {
+    #[must_use]
+    pub const fn new(source: std::sync::Arc<TiingoDaily>) -> Self {
+        Self {
+            source,
+            poll: Duration::from_hours(1),
+        }
+    }
+
+    /// Check again this often while waiting for a bar (tests use a short one).
+    #[must_use]
+    pub const fn with_poll(mut self, poll: Duration) -> Self {
+        self.poll = poll;
+        self
+    }
+}
+
+/// Every instrument's bars after `last`, sorted by time then by position in `instruments`.
+async fn new_bars(
+    source: &TiingoDaily,
+    instruments: &[InstrumentId],
+    last: &std::collections::BTreeMap<InstrumentId, DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> std::result::Result<Vec<(usize, InstrumentId, Bar)>, PortError> {
+    let mut out = Vec::new();
+    for (rank, instrument) in instruments.iter().enumerate() {
+        let after = last[instrument];
+        let bars = source
+            .bars(instrument, DAILY, after + TimeDelta::milliseconds(1), now)
+            .await?;
+        out.extend(
+            bars.into_iter()
+                .filter(|b| b.ts > after)
+                .map(|b| (rank, instrument.clone(), b)),
+        );
+    }
+    out.sort_by_key(|(rank, _, b)| (b.ts, *rank));
+    Ok(out)
+}
+
+#[async_trait]
+impl quorum_core::MarketStream for TiingoStream {
+    fn venue(&self) -> &VenueId {
+        &self.source.venue
+    }
+
+    async fn subscribe(
+        &self,
+        instruments: &[InstrumentId],
+        interval: &str,
+    ) -> std::result::Result<
+        futures_core::stream::BoxStream<'static, quorum_core::StreamedBar>,
+        PortError,
+    > {
+        use futures_util::StreamExt as _;
+        if interval != DAILY {
+            return Err(PortError::Unsupported(format!(
+                "Tiingo streams daily bars (1d) only, not {interval}"
+            )));
+        }
+        let Some(lead) = instruments.first().cloned() else {
+            return Err(PortError::Invalid("nothing to stream".to_owned()));
+        };
+        let (tx, rx) = tokio::sync::mpsc::channel(512);
+        let source = std::sync::Arc::clone(&self.source);
+        let instruments = instruments.to_vec();
+        let poll = self.poll;
+        tokio::spawn(async move {
+            // A few days back: the consumer skips what it has and backfills older gaps itself.
+            let start = Utc::now() - TimeDelta::days(4);
+            let mut last: std::collections::BTreeMap<InstrumentId, DateTime<Utc>> =
+                instruments.iter().map(|i| (i.clone(), start)).collect();
+            while !tx.is_closed() {
+                let now = Utc::now();
+                let due = next_bar_ready(last[&lead]);
+                if now < due {
+                    let wait = (due - now).to_std().unwrap_or(poll).min(poll);
+                    tokio::time::sleep(wait).await;
+                    continue;
+                }
+                let found = new_bars(&source, std::slice::from_ref(&lead), &last, now).await;
+                let result = match found {
+                    Ok(lead_bars) if lead_bars.is_empty() => Ok(Vec::new()),
+                    Ok(_) => new_bars(&source, &instruments, &last, now).await,
+                    Err(err) => Err(err),
+                };
+                match result {
+                    Ok(bars) if bars.is_empty() => tokio::time::sleep(poll).await,
+                    Ok(bars) => {
+                        for (_, instrument, bar) in bars {
+                            last.insert(instrument.clone(), bar.ts);
+                            if tx.send(Ok((instrument, bar))).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        if tx.send(Err(err)).await.is_err() {
+                            return;
+                        }
+                        tokio::time::sleep(poll).await;
+                    }
+                }
+            }
+        });
+        Ok(tokio_stream::wrappers::ReceiverStream::new(rx).boxed())
+    }
+}
+
 #[cfg(test)]
 mod tests;

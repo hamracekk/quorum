@@ -11,6 +11,7 @@ repo root.
 ```bash
 cargo build --release -p quorum-cli
 ./deploy/launchd/install.sh crypto-spot       # load now and at every login
+./deploy/launchd/install.sh multi-asset       # the ETF slot (Tiingo end-of-day, needs the Tiingo key)
 quorum paper status --slot crypto-spot        # heartbeat age, equity, positions
 tail -f ~/Library/Logs/quorum/paper-crypto-spot.log
 ./deploy/launchd/uninstall.sh crypto-spot     # remove (the session stays resumable)
@@ -33,7 +34,8 @@ Every restart resumes the open session by replay, so nothing is lost or journale
 `com.quorum.watchdog` runs `quorum watchdog --slots <slots>` at login and every 5 minutes. It
 alerts (config/notify.toml) when a paper session is `running` but its heartbeat is older than
 5 minutes, when a session `failed`, when the recorder wrote nothing for 15 minutes, or when the
-risk process does not answer (slots then refuse every order that adds risk) — once when
+risk process does not answer or cannot read the envelope (slots then refuse every order that
+adds risk) — once when
 it breaks, once when it recovers (state in `data/watchdog.json`). Right after a sleep it only
 records the time. Read-only: it never starts, stops or trades anything.
 

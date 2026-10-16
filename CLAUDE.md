@@ -80,6 +80,7 @@ cargo run --release -p quorum-cli -- paper run --slot crypto-spot   # paper-trad
 cargo run --release -p quorum-cli -- paper status --slot crypto-spot
 cargo run --release -p quorum-cli -- paper stop --slot crypto-spot
 ./deploy/launchd/install.sh crypto-spot     # run it under launchd (deploy/README.md)
+./deploy/launchd/install.sh multi-asset     # the ETF slot: Tiingo end-of-day prices, simulated fills
 cargo run --release -p quorum-cli -- record   # forward recorder (config/recorder.toml)
 ./deploy/launchd/install-recorder.sh        # the recorder under launchd
 cargo run --release -p quorum-cli -- notify --test   # phone alert test (ntfy; topic in the keychain)

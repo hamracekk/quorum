@@ -184,3 +184,67 @@ async fn another_services_key_is_never_sent_to_tiingo() {
     assert!(format!("{err:#}").contains("nothing was sent"), "{err:#}");
     assert!(tiingo.check().await.is_err());
 }
+
+#[test]
+fn the_next_bar_is_ready_once_the_next_weekday_is_over() {
+    // Thursday's bar → Friday's, ready Saturday 00:00 UTC.
+    assert_eq!(next_bar_ready(day(2026, 10, 15)), day(2026, 10, 17));
+    // Friday's bar → Monday's, ready Tuesday 00:00 UTC (the weekend has none).
+    assert_eq!(next_bar_ready(day(2026, 10, 16)), day(2026, 10, 20));
+}
+
+#[tokio::test]
+async fn the_stream_yields_each_days_bars_in_time_and_subscription_order() {
+    use futures_util::StreamExt as _;
+    use quorum_core::MarketStream as _;
+
+    let server = MockServer::start().await;
+    // Two weekdays well inside the stream's first look-back window.
+    let today = Utc::now().date_naive();
+    let mut days = Vec::new();
+    let mut d = today - TimeDelta::days(1);
+    while days.len() < 2 {
+        if !matches!(
+            chrono::Datelike::weekday(&d),
+            chrono::Weekday::Sat | chrono::Weekday::Sun
+        ) {
+            days.push(d);
+        }
+        d -= TimeDelta::days(1);
+    }
+    days.reverse();
+    for (ticker, base) in [("SPY", 500.0), ("TLT", 90.0)] {
+        Mock::given(method("GET"))
+            .and(path(format!("/tiingo/daily/{ticker}/prices")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                row(&days[0].to_string(), base),
+                row(&days[1].to_string(), base + 1.0),
+            ])))
+            .mount(&server)
+            .await;
+    }
+    let tiingo = TiingoDaily::with_base_url(server.uri(), Some(TOKEN.into())).expect("client");
+    let stream =
+        TiingoStream::new(std::sync::Arc::new(tiingo)).with_poll(Duration::from_millis(50));
+    let spy: InstrumentId = "tiingo:SPY:equity".parse().expect("instrument");
+    let tlt: InstrumentId = "tiingo:TLT:equity".parse().expect("instrument");
+    let mut bars = stream
+        .subscribe(&[spy.clone(), tlt.clone()], "1d")
+        .await
+        .expect("stream");
+    let mut got = Vec::new();
+    for _ in 0..4 {
+        let (instrument, bar) = bars.next().await.expect("item").expect("bar");
+        got.push((instrument, bar.ts.date_naive()));
+    }
+    assert_eq!(
+        got,
+        [
+            (spy.clone(), days[0]),
+            (tlt.clone(), days[0]),
+            (spy, days[1]),
+            (tlt, days[1]),
+        ]
+    );
+    assert!(stream.subscribe(&[], "1d").await.is_err());
+}

@@ -322,20 +322,35 @@ fn notifier(config: &Path) -> Result<Arc<dyn quorum_core::Notifier>> {
 
 /// The adapters for the slot's venue.
 async fn ports(slot: &SlotConfig, config: &Path, data: &Path) -> Result<Ports> {
-    if slot.venue.as_str() != "binance" {
-        bail!(
-            "no adapters for venue `{}` yet (binance only)",
-            slot.venue.as_str()
-        );
-    }
+    let (market, stream): (
+        Arc<dyn quorum_core::MarketData>,
+        Arc<dyn quorum_core::MarketStream>,
+    ) = match slot.venue.as_str() {
+        "binance" => (
+            Arc::new(BinanceSpot::new().context("binance market data")?),
+            Arc::new(BinanceStream::new().context("binance stream")?),
+        ),
+        // End-of-day ETF prices; fills are simulated like every paper fill (no broker).
+        "tiingo" => {
+            let key = secrets::get(secrets::TIINGO);
+            if key.is_none() {
+                bail!("no Tiingo key: `quorum secrets set tiingo` (free key at tiingo.com)");
+            }
+            let tiingo =
+                Arc::new(quorum_data::tiingo::TiingoDaily::new(key).context("tiingo prices")?);
+            let stream = quorum_data::tiingo::TiingoStream::new(Arc::clone(&tiingo));
+            (tiingo, Arc::new(stream))
+        }
+        other => bail!("no paper adapters for venue `{other}` yet (binance, tiingo)"),
+    };
     std::fs::create_dir_all(data).with_context(|| format!("data dir {}", data.display()))?;
     let journal = SqliteJournal::open(&data.join("quorum.db"))
         .await
         .context("journal")?;
     let log = JsonlEventLog::open(data.join("events")).context("event log")?;
     Ok(Ports {
-        market: Arc::new(BinanceSpot::new().context("binance market data")?),
-        stream: Arc::new(BinanceStream::new().context("binance stream")?),
+        market,
+        stream,
         bars: Arc::new(ParquetStore::new(data.join("bars"))),
         journal: Arc::new(journal),
         log: Arc::new(log),
@@ -357,6 +372,12 @@ async fn paper_run(config: &Path, data: &Path, slot: &str, fresh: bool) -> Resul
     let ports = ports(&slot, config, data).await?;
     let options = RunOptions {
         fresh,
+        // End-of-day data within Tiingo's free limits: the stream already polls each new day.
+        catch_up_every: if slot.venue.as_str() == "tiingo" {
+            std::time::Duration::from_hours(6)
+        } else {
+            RunOptions::new(data.to_path_buf()).catch_up_every
+        },
         ..RunOptions::new(data.to_path_buf())
     };
     let outcome = run(&ports, &slot, &envelope, &options, shutdown_signal()).await?;
@@ -823,15 +844,20 @@ async fn watchdog(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
         seen.push((id.clone(), state));
     }
     let gate = quorum_risk::SocketGate::new(risk::paths(config, data).socket());
-    let risk_answered =
-        tokio::task::spawn_blocking(move || gate.request(&quorum_risk::Request::Status).is_ok())
-            .await
-            .ok();
+    let status = tokio::task::spawn_blocking(move || gate.request(&quorum_risk::Request::Status))
+        .await
+        .ok();
+    let risk_answered = status.as_ref().map(Result::is_ok);
+    let envelope_ok = match status {
+        Some(Ok(quorum_risk::Response::Status(report))) => Some(report.envelope_ok),
+        _ => None,
+    };
     let observation = Observation {
         now: chrono::Utc::now(),
         slots: seen,
         recorder_last_write: last_write(&data.join("recorder")),
         risk_answered,
+        envelope_ok,
     };
     let path = data.join("watchdog.json");
     let before: WatchState = std::fs::read_to_string(&path)

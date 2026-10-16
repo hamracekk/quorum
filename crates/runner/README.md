@@ -12,7 +12,7 @@ trader's paper daemon, scoped to a slot and its envelope.
 | `session.rs` | `SlotFiles` (`<data>/slots/<id>/`), `Session`, `StateFile`, `request_stop` |
 | `gate.rs` | `GatedBroker`: every order goes to the risk process first; verdicts recorded per session in `verdicts.jsonl` so replay repeats them |
 | `paper.rs` | `run`: preflight → open/resume → sync history → rebuild by replay → live loop; `RunOptions`, `Outcome`, `Status` |
-| `watchdog.rs` | The watchdog's decisions, pure: incidents (paper heartbeat stale or failed, recorder stale, risk process not answering), alert once on open and once on recovery, skip right after a sleep |
+| `watchdog.rs` | The watchdog's decisions, pure: incidents (paper heartbeat stale or failed, recorder stale, risk process not answering or unable to read the envelope), alert once on open and once on recovery, skip right after a sleep |
 | `tests/paper.rs` | End to end on fakes: journaling from the start, resume == uninterrupted run, offline days, gap backfill, stop, refusals, risk gate (approval, process down, replayed verdicts) |
 
 ## A run
