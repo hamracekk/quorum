@@ -37,6 +37,10 @@ const fn monthly() -> usize {
     21
 }
 
+fn usd() -> String {
+    "USD".to_owned()
+}
+
 /// The operator's benchmarks.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,6 +53,12 @@ pub struct BenchmarkConfig {
     /// taken as held long enough to be exempt.
     #[serde(default)]
     pub trading_tax: f64,
+    /// The investor's currency: `USD` (the curves' own) or `CZK` (converted at ČNB rates).
+    #[serde(default = "usd")]
+    pub currency: String,
+    /// Cost of each currency conversion (in at the start, out at the end) as a fraction.
+    #[serde(default)]
+    pub fx_cost: f64,
     pub portfolios: Vec<Portfolio>,
 }
 
@@ -64,6 +74,12 @@ impl BenchmarkConfig {
         let invalid = |m: String| Err(LabError::Benchmark(m));
         if !(0.0..1.0).contains(&cfg.trading_tax) {
             return invalid(format!("trading_tax {} must be in [0, 1)", cfg.trading_tax));
+        }
+        if !matches!(cfg.currency.as_str(), "USD" | "CZK") {
+            return invalid(format!("currency `{}`: USD or CZK", cfg.currency));
+        }
+        if !(0.0..0.05).contains(&cfg.fx_cost) {
+            return invalid(format!("fx_cost {} must be in [0, 0.05)", cfg.fx_cost));
         }
         if cfg.portfolios.is_empty() {
             return invalid("no portfolios".to_owned());
@@ -168,6 +184,32 @@ pub fn curve(
         });
     }
     Ok(out)
+}
+
+/// `curve` (in USD) in another currency, paying `fx_cost` to convert in and out.
+///
+/// Each point is multiplied by the latest `rates` fixing on or before its date (`rates`: units of
+/// that currency per USD); points before the first fixing are dropped.
+#[must_use]
+pub fn in_currency(
+    curve: &[EquityPoint],
+    rates: &BTreeMap<chrono::NaiveDate, f64>,
+    fx_cost: f64,
+) -> Vec<EquityPoint> {
+    let mut out: Vec<EquityPoint> = curve
+        .iter()
+        .filter_map(|p| {
+            let (_, rate) = rates.range(..=p.ts.date_naive()).next_back()?;
+            Some(EquityPoint {
+                ts: p.ts,
+                equity: p.equity * rate * (1.0 - fx_cost),
+            })
+        })
+        .collect();
+    if let Some(last) = out.last_mut() {
+        last.equity *= 1.0 - fx_cost;
+    }
+    out
 }
 
 /// `curve` after paying `rate` of each calendar year's net gain at the year's last point.

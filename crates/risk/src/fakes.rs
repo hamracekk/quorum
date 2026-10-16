@@ -16,6 +16,8 @@ pub enum FakeMode {
     RefuseIncreases(String),
     /// Unreachable: every call fails.
     Down,
+    /// The slot is halted: increases are refused and pings report the halt.
+    Halted(Halt),
 }
 
 /// Answers as its [`FakeMode`] says and remembers every order it was asked about.
@@ -66,7 +68,10 @@ impl RiskGate for FakeGate {
             FakeMode::RefuseIncreases(reason) if !order.reduces_risk() => {
                 Ok(Verdict::reject(reason))
             }
-            FakeMode::RefuseIncreases(_) => Ok(Verdict::approve("reduces risk")),
+            FakeMode::Halted(halt) if !order.reduces_risk() => Ok(Verdict::reject(halt.describe())),
+            FakeMode::RefuseIncreases(_) | FakeMode::Halted(_) => {
+                Ok(Verdict::approve("reduces risk"))
+            }
             FakeMode::Down => Err(RiskError::Unreachable("fake: down".to_owned())),
         }
     }
@@ -74,6 +79,7 @@ impl RiskGate for FakeGate {
     fn ping(&self, _ping: &Ping) -> Result<Option<Halt>, RiskError> {
         match self.mode() {
             FakeMode::Down => Err(RiskError::Unreachable("fake: down".to_owned())),
+            FakeMode::Halted(halt) => Ok(Some(halt)),
             _ => Ok(None),
         }
     }

@@ -25,9 +25,19 @@ pub struct OrderCheck {
     /// Sum of |position value| over the slot's book before the order, at the latest marks.
     pub gross: f64,
     pub equity: f64,
-    /// When the slot decided the order (its bar time).
+    /// Value after the order of the slot's positions whose returns move with this instrument's
+    /// (correlation ≥ [`CLUSTER_CORRELATION`], itself included); 0 when not measured.
+    #[serde(default)]
+    pub cluster: f64,
+    /// The time of the bar the order fills on.
     pub ts: DateTime<Utc>,
+    /// The slot's bar interval in seconds; 0 when unknown (no staleness check).
+    #[serde(default)]
+    pub interval_secs: i64,
 }
+
+/// Return correlation at which two instruments count as one cluster.
+pub const CLUSTER_CORRELATION: f64 = 0.7;
 
 impl OrderCheck {
     /// Signed quantity held after the order fills in full.

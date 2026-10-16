@@ -20,8 +20,10 @@ currency = "EUR"                                   # ISO code
 capital_total = 0                                  # ≥ 0
 leverage_max = 1.0                                 # > 0
 venues_allowed = ["binance"]                       # venue ids, paper included
-loss = { daily_max = 0.02, total_max = 0.15 }      # fractions in (0, 1], daily ≤ total
+loss = { daily_max = 0.05, total_max = 0.15 }      # fractions in (0, 1], daily ≤ total
 slot_default = { capital_max = 0, max_mode = "paper" }
+position_max = 0.25                                # optional, (0, leverage_max]: one position's share of equity
+cluster_max = 1.0                                  # optional: positions correlated ≥ 0.7 with one instrument
 
 [slots.crypto-spot]                                # optional per-slot override
 capital_max = 2000                                 # ≤ capital_total

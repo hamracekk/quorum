@@ -8,7 +8,9 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use quorum_core::{BarStore as _, Event, Journal as _, Series};
 use quorum_data::ParquetStore;
-use quorum_evaluator::{CaseConfig, EXIT, EvaluatorStudy, StudyConfig, cases, study};
+use quorum_evaluator::{
+    CaseConfig, EXIT, EvaluatorStudy, MetaConfig, MetaReport, StudyConfig, cases, shadow, study,
+};
 use quorum_journal::SqliteJournal;
 use quorum_runner::SlotFiles;
 
@@ -111,6 +113,7 @@ pub(crate) async fn run(config: &Path, data: &Path, slot: &str, source: Source) 
         &CaseConfig::new(cost, per_year),
     );
     let report = study(&found, &StudyConfig::default());
+    let meta = shadow(&found, &MetaConfig::default());
 
     let dir = data.join("evaluator");
     std::fs::create_dir_all(&dir).with_context(|| format!("{}", dir.display()))?;
@@ -125,11 +128,13 @@ pub(crate) async fn run(config: &Path, data: &Path, slot: &str, source: Source) 
     let saved = crate::save_report(
         data,
         &format!("evaluator-{}-{}", slot.id, source.as_str()),
-        &report,
+        &serde_json::json!({ "study": report, "meta": meta }),
     )?;
 
     print(&report, slot.id.as_str(), source, cost);
-    if source == Source::History {
+    print_meta(&meta);
+    let survivors = matches!(slot.universe, quorum_slots::Universe::Fixed { .. });
+    if source == Source::History && survivors {
         println!(
             "History cases come from the slot's own strategy, whose settings were chosen on this \
              history, over today's surviving instruments: base rates are flattered."
@@ -138,6 +143,35 @@ pub(crate) async fn run(config: &Path, data: &Path, slot: &str, source: Source) 
     println!("cases: {}", path.display());
     println!("report: {}", saved.display());
     Ok(())
+}
+
+fn print_meta(m: &MetaReport) {
+    println!(
+        "meta model (logistic, walk-forward, purged; {} features): {} entries predicted out of sample · AUC {:.3} (z {:.2})",
+        m.features.len(),
+        m.n_out,
+        m.auc_out,
+        m.z_out
+    );
+    println!(
+        "  always take {:.2}% · take what it rates above the earlier win rate: {} entries {:.2}% · skip {} entries {:.2}% (t {:.2})  {:?}",
+        m.always_mean * 100.0,
+        m.taken_n,
+        m.taken_mean * 100.0,
+        m.skipped_n,
+        m.skipped_mean * 100.0,
+        m.skipped_t,
+        m.verdict
+    );
+    let top: Vec<String> = m
+        .weights
+        .iter()
+        .take(5)
+        .map(|(n, w)| format!("{n} {w:+.2}"))
+        .collect();
+    if !top.is_empty() {
+        println!("  largest weights: {}", top.join(", "));
+    }
 }
 
 fn print(report: &EvaluatorStudy, slot: &str, source: Source, cost: f64) {

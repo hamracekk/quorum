@@ -12,6 +12,7 @@ of sample. Nothing here changes a trade: the size multiplier stays 1.0 until a m
 |---|---|
 | `case.rs` | `Case`, `CaseConfig`, `cases`: entries from the engine's `Target` events (flat → position, or a flip), point-in-time features, labels at `HORIZONS` and at the strategy's own `EXIT` |
 | `study.rs` | `study`: base rates per label and regime, regime skips (a regime's entries skipped if they lost in sample, judged out of sample with a threshold corrected for the regimes tested), the "always take" baseline in and out of sample, per-feature AUC with the direction fixed in sample, Bonferroni over features tested |
+| `meta.rs` | `shadow`: the meta model (L2 logistic regression on every case feature plus the regime) judged walk-forward and purged — each later fold predicted by a model trained only on cases whose exit filled before it — and the policy "take what it rates above the earlier win rate" against always taking |
 | `tests/evaluator.rs` | Labels after costs, counterfactuals, no look-ahead in features, flips, the warm-up of a paper session, AUC, study verdicts |
 
 ## A case
@@ -39,8 +40,8 @@ of sample. Nothing here changes a trade: the size multiplier stays 1.0 until a m
 
 ## Not yet
 
-News features (readings started 2026-10-16), the meta model (gradient-boosted trees,
-calibrated), Claude case review (§10.2), portfolio-fit sizing (§10.4), and scoring the
+News features (readings started 2026-10-16), gradient-boosted trees and calibration for the
+meta model (once the logistic one finds something), Claude case review (§10.2), portfolio-fit sizing (§10.4), and scoring the
 evaluator's verdicts against its own counterfactuals once it decides anything.
 
 ## Test

@@ -20,7 +20,9 @@ mod server;
 pub mod state;
 
 pub use client::{RiskGate, SocketGate};
-pub use protocol::{OrderCheck, Ping, Request, Response, StatusReport, Verdict};
+pub use protocol::{
+    CLUSTER_CORRELATION, OrderCheck, Ping, Request, Response, StatusReport, Verdict,
+};
 pub use server::{RiskPaths, serve};
 pub use state::{Halt, RiskState, SlotRisk};
 

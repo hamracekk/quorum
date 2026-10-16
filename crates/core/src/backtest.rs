@@ -20,6 +20,9 @@ pub struct BacktestConfig {
     /// latest bar dollar volume)`, the square-root law; `0` = off.
     pub impact: f64,
     pub risk: RiskLimits,
+    /// Fills pay at least the spread estimated from each instrument's recent highs and lows
+    /// (`core::spread`) instead of the fixed slippage alone; off by default.
+    pub estimate_spread: bool,
     /// Per-trade exits and risk-per-trade sizing (T-2); off by default.
     pub stops: StopRules,
     /// With funding: whether longs are held as perpetuals and pay it too (`false`: longs are
@@ -36,6 +39,7 @@ impl Default for BacktestConfig {
             fee_rate: 0.001,
             slippage_bps: 2.0,
             impact: 0.0,
+            estimate_spread: false,
             risk: RiskLimits::default(),
             stops: StopRules::default(),
             perp_longs: true,
@@ -148,6 +152,7 @@ mod tests {
             fee_rate: 0.0,
             slippage_bps: 0.0,
             impact: 0.0,
+            estimate_spread: false,
             risk: RiskLimits {
                 max_daily_loss: 1.0,
                 ..RiskLimits::default()

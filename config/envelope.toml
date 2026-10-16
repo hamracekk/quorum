@@ -17,6 +17,14 @@ venues_allowed = ["binance"]
 # (`quorum backtest --daily-loss`); 5% halts about twice a year with the smallest drawdown.
 loss = { daily_max = 0.05, total_max = 0.15 }
 
+# Concentration (operator decision 2026-10-16), enforced by the risk process on every order that
+# adds risk. One position at most 25% of a slot's equity (crypto-spot holds ~3% each today). The
+# positions moving together with an instrument (return correlation ≥ 0.7, itself included) at
+# most 100% of equity: no limit beyond leverage while one market is traded; lower it as the book
+# spans more markets.
+position_max = 0.25
+cluster_max = 1.0
+
 # Bounds for every slot without its own entry below.
 slot_default = { capital_max = 0, max_mode = "paper" }
 

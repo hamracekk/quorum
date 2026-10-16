@@ -20,7 +20,8 @@ change when its module map, invariants or extension steps change.
 - **Asymmetric decision rights.** Anything may reduce risk; only the allocator adds risk, and only
   on evidence. The risk process (`quorum_risk`, its own OS process) is the only component that
   approves orders: every paper order goes through `runner`'s `GatedBroker`, risk-reducing orders
-  always pass, and an unreachable process means no new risk. Verdicts are recorded per session
+  always pass, an unreachable process or stale data means no new risk, and a kill switch or
+  total-drawdown halt flattens the slot at its next bar (recorded and replayed like verdicts). Verdicts are recorded per session
   and replayed, never asked again.
 - **One engine.** Backtest, replay, paper and live go through `core::Engine`. Never add a second
   simulation loop. `core/tests/golden.rs` pins results bit for bit; change its constants only for

@@ -8,6 +8,7 @@ Implements the `core` ports; nothing outside this crate knows about Binance or P
 | File | What it holds |
 |---|---|
 | `binance.rs` | `BinanceSpot`: async `MarketData` adapter for Binance spot klines (public REST, no key). Pages 1000 bars/request, drops still-forming bars, `end` exclusive, 200 ms between pages; `BookFeed` (`/api/v3/depth`, 1000 levels) |
+| `cnb.rs` | Czech National Bank daily fixings (the rates Czech tax uses): yearly files read by their header, CZK per unit of a currency |
 | `binance_archive.rs` | R-1: Binance public data archive (data.binance.vision) — paged S3 listing of every spot symbol ever listed, monthly kline zips (CSV, ms or µs times) for delisted coins; `usdt_candidates` (USDT pairs without stablecoins, fiat or leveraged tokens) and `sync_archive` (store every missing symbol, a few at a time) |
 | `binance_futures.rs` | E-2: `BinanceFutures`, public keyless USDT-perpetual funding-rate history (`/fapi/v1/fundingRate`), paged; `DerivsFeed` (premium index for every perpetual, open interest per symbol) |
 | `binance_liquidations.rs` | `BinanceLiquidations`: `LiquidationFeed` over the futures websocket `/market/ws/!forceOrder@arr` (the legacy `/ws` path connects but stays silent since Binance’s 2026-04-23 migration); reports every connect and disconnect; reconnects with backoff |

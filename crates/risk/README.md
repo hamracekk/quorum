@@ -26,8 +26,13 @@ the operator pulls the kill switch through it.
 4. The slot's **mode** must be at least `paper` and within the envelope's `max_mode`; live modes
    are refused (no live execution exists).
 5. The instrument's **venue** must be in the envelope.
-6. **Leverage:** gross exposure after the order ≤ `leverage_max` × equity (+1% allowance for fees
+6. **Stale data:** an order on a bar more than two intervals (+1 h) old adds no risk — a gap, a
+   sleep or a stalled feed.
+7. **Leverage:** gross exposure after the order ≤ `leverage_max` × equity (+1% allowance for fees
    and slippage).
+8. **Concentration:** the position after the order ≤ `position_max`, and the positions moving with
+   the instrument (60-quote return correlation ≥ 0.7, itself included) ≤ `cluster_max`, both as
+   fractions of equity (envelope, optional).
 
 Every order and ping carries the slot's equity. The process measures the **daily loss** against
 the last equity it saw before the UTC day began (halt until the next day) and the **total
@@ -44,11 +49,15 @@ both references from the last equity, so the same loss does not halt again.
 - **Short socket path.** macOS limits a Unix socket path to 103 bytes: keep `--data` short
   (the default `data/`, run from the repo root, is fine).
 
+**Flattening:** a kill switch or a total-drawdown halt reaches the slot with its next heartbeat;
+the slot caps every target at 0 (three bars, extended while the halt lasts), so positions are
+sold at the next bar through the normal order path, and the strategy re-enters after the halt is
+lifted. The cap is recorded (`risk-caps.jsonl`) and replayed at the same point on resume.
+
 ## Not yet
 
 NATS instead of the local socket (with the server move); positions read from venues instead of
-the slot's own book; per-position, correlation and liquidity limits; flattening on a halt;
-heartbeat-based halts when a slot or its data goes stale.
+the slot's own book; liquidity caps; flattening between bars (needs live execution).
 
 ## Test
 

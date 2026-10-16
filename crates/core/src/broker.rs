@@ -35,6 +35,10 @@ pub trait Broker: fmt::Debug + Send {
     /// from it; live adapters ignore it.
     fn liquidity(&mut self, _instrument: &InstrumentId, _dollar_volume: f64) {}
 
+    /// Estimated half-spread of `instrument` (a fraction of price) from its latest bars.
+    /// Simulated venues fill at least that far from the quote; live adapters ignore it.
+    fn spread(&mut self, _instrument: &InstrumentId, _half_spread: f64) {}
+
     /// Hand over a new order (status `New`). An `Err` means the order never reached the
     /// venue; the engine records it as rejected. Venue-side refusals are reported through
     /// [`poll`](Self::poll) as [`ExecutionReport::Rejected`] instead.
@@ -60,6 +64,8 @@ pub struct PaperBroker {
     impact: f64,
     /// Latest bar dollar volume per instrument.
     volumes: BTreeMap<InstrumentId, f64>,
+    /// Estimated half-spread per instrument, when the engine estimates them.
+    spreads: BTreeMap<InstrumentId, f64>,
     quotes: BTreeMap<InstrumentId, f64>,
     resting: Vec<Order>,
     reports: Vec<ExecutionReport>,
@@ -72,6 +78,7 @@ impl PaperBroker {
             slippage: slippage_bps / 10_000.0,
             impact: 0.0,
             volumes: BTreeMap::new(),
+            spreads: BTreeMap::new(),
             quotes: BTreeMap::new(),
             resting: Vec::new(),
             reports: Vec::new(),
@@ -100,7 +107,8 @@ impl PaperBroker {
     }
 
     fn execute(&mut self, order: &Order, ts: DateTime<Utc>, price: f64) {
-        let slip = self.slippage + self.impact_of(&order.instrument, order.qty * price);
+        let spread = self.spreads.get(&order.instrument).copied().unwrap_or(0.0);
+        let slip = self.slippage.max(spread) + self.impact_of(&order.instrument, order.qty * price);
         let exec_price = match order.side {
             Side::Buy => price * (1.0 + slip),
             Side::Sell => price * (1.0 - slip),
@@ -130,6 +138,10 @@ impl Broker for PaperBroker {
 
     fn liquidity(&mut self, instrument: &InstrumentId, dollar_volume: f64) {
         self.volumes.insert(instrument.clone(), dollar_volume);
+    }
+
+    fn spread(&mut self, instrument: &InstrumentId, half_spread: f64) {
+        self.spreads.insert(instrument.clone(), half_spread);
     }
 
     fn quote(&mut self, instrument: &InstrumentId, ts: DateTime<Utc>, price: f64) {

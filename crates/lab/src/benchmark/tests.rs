@@ -177,3 +177,31 @@ fn tax_takes_a_share_of_each_winning_year_only() {
     assert!((post[3].equity - 95.208_75).abs() < 1e-9);
     assert_eq!(after_tax(&pre, 0.0), pre);
 }
+
+#[test]
+fn a_curve_in_czk_follows_the_rate_and_pays_to_convert_both_ways() {
+    let usd = vec![
+        EquityPoint {
+            ts: start(),
+            equity: 100.0,
+        },
+        EquityPoint {
+            ts: start() + Duration::days(1),
+            equity: 110.0,
+        },
+        EquityPoint {
+            ts: start() + Duration::days(3),
+            equity: 110.0,
+        },
+    ];
+    let rates = BTreeMap::from([
+        (start().date_naive(), 20.0),
+        ((start() + Duration::days(1)).date_naive(), 25.0),
+    ]);
+    let czk = in_currency(&usd, &rates, 0.01);
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    assert!(close(czk[0].equity, 1_980.0));
+    assert!(close(czk[1].equity, 2_722.5));
+    // Day 3 has no fixing (weekend): the last one holds; converting out costs again.
+    assert!(close(czk[2].equity, 2_722.5 * 0.99));
+}

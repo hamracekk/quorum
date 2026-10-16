@@ -45,3 +45,4 @@ stale_bars = 5          # no daily bar for 5 days: treated as delisted, sold at 
 fee_rate = 0.001
 slippage_bps = 2.0
 impact = 0.05
+estimate_spread = true  # thin alts: fills pay the spread estimated from highs and lows

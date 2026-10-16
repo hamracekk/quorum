@@ -5,11 +5,13 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, Duration, Utc};
-use quorum_core::{MarketData as _, PassiveBenchmark, PortError, Series};
+use chrono::{DateTime, Datelike as _, Duration, Utc};
+use quorum_core::{EquityPoint, MarketData as _, PassiveBenchmark, PortError, Series};
 use quorum_data::tiingo::TiingoDaily;
 use quorum_lab::allocation::Variant;
-use quorum_lab::benchmark::{BenchmarkConfig, Portfolio, Verdict, after_tax, compare, curve};
+use quorum_lab::benchmark::{
+    BenchmarkConfig, Portfolio, Verdict, after_tax, compare, curve, in_currency,
+};
 use quorum_lab::overfit::normal_quantile;
 
 use crate::secrets;
@@ -24,10 +26,30 @@ fn side_cost(slot: &quorum_slots::SlotConfig) -> f64 {
 
 /// Compares every variant with every benchmark on the dates both cover, before and (with a
 /// `trading_tax`) after the trading book's tax, prints the tables and saves the report.
-pub(crate) fn compare_variants(config: &Path, data: &Path, variants: &[Variant]) -> Result<()> {
+pub(crate) async fn compare_variants(
+    config: &Path,
+    data: &Path,
+    variants: &[Variant],
+) -> Result<()> {
     let cfg = BenchmarkConfig::load(&config.join("benchmark.toml")).context("benchmark config")?;
     let (slot, series, _) = crate::research_series(config, data, &cfg.slot)?;
     let cost = side_cost(&slot);
+    // In the investor's currency: tax is owed on gains in CZK, exchange moves included.
+    let rates = if cfg.currency == "CZK" {
+        let first_year = variants
+            .iter()
+            .filter_map(|v| v.curve.first())
+            .map(|p| p.ts.year())
+            .min()
+            .unwrap_or_else(|| Utc::now().year());
+        Some(czk_per_usd(data, first_year).await?)
+    } else {
+        None
+    };
+    let convert = |c: &[EquityPoint]| match &rates {
+        Some(r) => in_currency(c, r, cfg.fx_cost),
+        None => c.to_vec(),
+    };
     let mut views = vec![("before tax".to_owned(), 0.0)];
     if cfg.trading_tax > 0.0 {
         views.push((
@@ -46,7 +68,7 @@ pub(crate) fn compare_variants(config: &Path, data: &Path, variants: &[Variant])
         .iter()
         .map(|p| {
             curve(p, &series, 10_000.0, cost)
-                .map(|c| (p.name.as_str(), c))
+                .map(|c| (p.name.as_str(), convert(&c)))
                 .with_context(|| format!("benchmark `{}`", p.name))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -55,7 +77,7 @@ pub(crate) fn compare_variants(config: &Path, data: &Path, variants: &[Variant])
         let mut rows = Vec::new();
         for (name, bench) in &benches {
             for v in variants {
-                let subject = after_tax(&v.curve, *tax);
+                let subject = after_tax(&convert(&v.curve), *tax);
                 if let Some(c) = compare((&v.name, &subject), (name, bench), 0.3, YEAR, t_threshold)
                 {
                     rows.push(c);
@@ -64,7 +86,8 @@ pub(crate) fn compare_variants(config: &Path, data: &Path, variants: &[Variant])
         }
         print_rows(
             &format!(
-                "vs passive benchmarks, after costs, {label} (|t| ≥ {t_threshold:.2} across {trials} comparisons)"
+                "vs passive benchmarks in {}, after costs, {label} (|t| ≥ {t_threshold:.2} across {trials} comparisons)",
+                cfg.currency
             ),
             &rows,
         );
@@ -113,6 +136,38 @@ fn print_rows(title: &str, rows: &[quorum_lab::benchmark::Comparison]) {
             }
         );
     }
+}
+
+/// CZK per USD at ČNB fixings from `first_year` on, cached in `data/research/fx/CZK-USD.json`
+/// and refreshed when the cache is more than a few days old.
+async fn czk_per_usd(
+    data: &Path,
+    first_year: i32,
+) -> Result<std::collections::BTreeMap<chrono::NaiveDate, f64>> {
+    let dir = data.join("research").join("fx");
+    let path = dir.join("CZK-USD.json");
+    let today = Utc::now().date_naive();
+    let cached: Option<std::collections::BTreeMap<chrono::NaiveDate, f64>> =
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok());
+    if let Some(rates) = cached
+        && rates
+            .first_key_value()
+            .is_some_and(|(d, _)| d.year() <= first_year)
+        && rates
+            .last_key_value()
+            .is_some_and(|(d, _)| (today - *d).num_days() <= 4)
+    {
+        return Ok(rates);
+    }
+    let rates = quorum_data::cnb::rates("USD", first_year, today.year())
+        .await
+        .context("ČNB exchange rates")?;
+    std::fs::create_dir_all(&dir).with_context(|| format!("{}", dir.display()))?;
+    std::fs::write(&path, serde_json::to_string(&rates)?)
+        .with_context(|| format!("{}", path.display()))?;
+    Ok(rates)
 }
 
 /// The summary benchmark priced from Tiingo end-of-day data.

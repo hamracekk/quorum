@@ -15,6 +15,7 @@ pub mod binance_futures;
 pub mod binance_liquidations;
 pub mod binance_testnet;
 pub mod binance_ws;
+pub mod cnb;
 mod error;
 pub mod indicators;
 pub mod quality;

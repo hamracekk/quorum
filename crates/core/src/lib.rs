@@ -27,6 +27,7 @@ pub mod regime;
 pub mod risk;
 pub mod signals;
 pub mod sizing;
+pub mod spread;
 pub mod stops;
 pub mod strategies;
 pub mod strategy;

@@ -44,6 +44,11 @@ trader's paper daemon, scoped to a slot and its envelope.
   process cannot be reached, risk-reducing orders pass and all others are refused; the heartbeat
   pings it and alerts once per outage. A refused order is rejected and retried at the next
   timestamp, like any order that never reached the venue.
+- **A risk halt flattens.** A kill switch or total-drawdown halt seen on the heartbeat caps every
+  target at 0 (`Engine::reduce_exposure`, three bars, extended while it lasts): positions are sold
+  at the next bar and the strategy re-enters after the halt is lifted. Each cap is recorded in
+  `risk-caps.jsonl` with the bar it followed and replayed there on resume (test
+  `a_risk_halt_sells_everything_at_the_next_bar_and_resumes_the_same_way`).
 - **Verdicts are replayed, not asked again.** Each verdict is appended to
   `<data>/slots/<id>/verdicts.jsonl` before the order goes out; replay uses the recorded verdict,
   and orders at or before the watermark with no record (sent before the gate existed) count as

@@ -42,6 +42,10 @@ pub struct Case {
     pub outcomes: BTreeMap<String, f64>,
     /// Bars held until the strategy's exit, once it has exited.
     pub held_bars: Option<usize>,
+    /// When the exit filled: the label is known from then on (a model may only learn from cases
+    /// whose exit came before the cases it predicts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_ts: Option<DateTime<Utc>>,
 }
 
 /// How cases are built.
@@ -154,6 +158,7 @@ pub fn cases(
                 features: features(&family, &indexed, instrument, *ts, &held, cfg),
                 outcomes: BTreeMap::new(),
                 held_bars: None,
+                exit_ts: None,
             };
             label_horizons(&mut case, own, i, cfg.cost);
             open.insert(instrument.clone(), out.len());
@@ -319,8 +324,10 @@ fn label_exit(case: &mut Case, s: &Indexed<'_>, exit_ts: DateTime<Utc>, cost: f6
         return;
     };
     let entry = s.bars.get(i + 1).map(|b| b.open).filter(|p| *p > 0.0);
-    let exit = s.bars.get(j + 1).map(|b| b.open);
+    let exit_bar = s.bars.get(j + 1);
+    let exit = exit_bar.map(|b| b.open);
     if let (Some(entry), Some(exit)) = (entry, exit) {
+        case.exit_ts = exit_bar.map(|b| b.ts);
         case.outcomes.insert(
             EXIT.to_owned(),
             case.direction.mul_add(exit / entry - 1.0, -cost),
