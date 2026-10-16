@@ -7,7 +7,10 @@ use quorum_core::regime::Regime;
 use quorum_core::{Bar, Event, InstrumentId, Series};
 use quorum_evaluator::case::Case;
 use quorum_evaluator::study::auc;
-use quorum_evaluator::{CaseConfig, EXIT, SkipVerdict, StudyConfig, Verdict, cases, study};
+use quorum_evaluator::{
+    CaseConfig, EXIT, MetaConfig, MetaVerdict, SkipVerdict, StudyConfig, Verdict, cases, shadow,
+    study,
+};
 
 fn day(n: i64) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0)
@@ -181,6 +184,7 @@ fn synthetic(n: usize) -> Vec<Case> {
                 ]),
                 outcomes: BTreeMap::from([(EXIT.to_owned(), net), ("h1".to_owned(), net)]),
                 held_bars: Some(3),
+                exit_ts: Some(day(i64::try_from(i).expect("small") + 3)),
             }
         })
         .collect()
@@ -250,4 +254,31 @@ fn a_regime_skip_is_chosen_in_sample_and_judged_out_of_sample() {
     assert!(skip(Regime::Crisis).skipping_out > skip(Regime::Crisis).always_out);
     assert_eq!(skip(Regime::Trending).verdict, SkipVerdict::NotChosen);
     assert_eq!(skip(Regime::Choppy).verdict, SkipVerdict::NotSignificant);
+}
+
+#[test]
+fn the_meta_model_beats_always_take_only_when_a_feature_predicts() {
+    // `signal` decides every outcome: a model trained on earlier cases ranks later winners.
+    let report = shadow(&synthetic(1_000), &MetaConfig::default());
+    assert_eq!(report.verdict, MetaVerdict::BeatsAlwaysTake, "{report:?}");
+    assert!(report.auc_out > 0.95);
+    assert!(report.taken_mean > report.always_mean);
+    assert_eq!(report.weights[0].0, "signal");
+
+    // Without it only noise is left: nothing to learn.
+    let noisy: Vec<_> = synthetic(1_000)
+        .into_iter()
+        .map(|mut c| {
+            c.features.remove("signal");
+            c
+        })
+        .collect();
+    assert_eq!(
+        shadow(&noisy, &MetaConfig::default()).verdict,
+        MetaVerdict::NoEdge
+    );
+    assert_eq!(
+        shadow(&synthetic(100), &MetaConfig::default()).verdict,
+        MetaVerdict::TooFew
+    );
 }

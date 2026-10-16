@@ -8,7 +8,9 @@
 //!   features tell winners from losers out of sample, corrected for the number tested.
 
 pub mod case;
+pub mod meta;
 pub mod study;
 
 pub use case::{Case, CaseConfig, EXIT, HORIZONS, cases};
+pub use meta::{MetaConfig, MetaReport, MetaVerdict, shadow};
 pub use study::{EvaluatorStudy, RegimeSkip, SkipVerdict, StudyConfig, Verdict, study};
