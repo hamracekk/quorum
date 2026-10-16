@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 
 use super::*;
 
@@ -18,6 +18,7 @@ fn curve(daily: &[f64]) -> Vec<EquityPoint> {
 
 fn config(weighting: Weighting) -> CombineConfig {
     CombineConfig {
+        tilts: Vec::new(),
         initial_cash: 1_000.0,
         weighting,
         vol_window_days: 10,
@@ -68,4 +69,44 @@ fn inverse_volatility_is_capped_so_a_calm_stream_cannot_take_everything() {
     let w = weights(&history, &config(Weighting::InverseVol { max_weight: 0.7 }));
     assert!((w[1] - 0.7).abs() < 1e-9, "calm stream capped: {w:?}");
     assert!((w[0] - 0.3).abs() < 1e-9);
+}
+
+#[test]
+fn tilts_hold_part_of_a_stream_in_cash_from_the_next_rebalance() {
+    let start = Utc
+        .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+        .single()
+        .expect("valid");
+    let rising = |name: &str| Stream {
+        name: name.into(),
+        curve: (0..40)
+            .map(|d| EquityPoint {
+                ts: start + Duration::days(d),
+                equity: 100.0 * 1.01_f64.powi(i32::try_from(d).expect("small")),
+            })
+            .collect(),
+    };
+    let streams = [rising("a"), rising("b")];
+    let base = CombineConfig {
+        weighting: Weighting::Fixed(vec![0.5, 0.5]),
+        rebalance_days: 1,
+        ..config(Weighting::Fixed(vec![0.5, 0.5]))
+    };
+    let full = combine(&streams, &base);
+    // Stream b held at half weight from day 10 on: less of the rise is earned.
+    let half: BTreeMap<NaiveDate, f64> = [((start + Duration::days(10)).date_naive(), 0.5)].into();
+    let tilted = combine(
+        &streams,
+        &CombineConfig {
+            tilts: vec![BTreeMap::new(), half],
+            ..base
+        },
+    );
+    let (f, t) = (
+        full.curve.last().expect("f").equity,
+        tilted.curve.last().expect("t").equity,
+    );
+    assert!(t < f, "{t} vs {f}");
+    // Before the tilt day the curves are identical (point in time).
+    assert!((full.curve[5].equity - tilted.curve[5].equity).abs() < 1e-9);
 }

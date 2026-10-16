@@ -6,6 +6,10 @@
 //! data only: `fixed` shares, or inverse volatility over `vol_window_days` capped at
 //! `max_weight` (a near-riskless stream such as carry would otherwise take everything). Between
 //! rebalances each stream's capital drifts with its own returns.
+//!
+//! **Tilts** (optional, per stream): at each rebalance a stream's weight is multiplied by its
+//! tilt on the latest day *before* the rebalance day (point in time), e.g. the exposure its
+//! market's regime allows; what the tilts hold back stays in cash at zero return.
 
 use std::collections::BTreeMap;
 
@@ -28,6 +32,17 @@ pub struct CombineConfig {
     pub weighting: Weighting,
     pub vol_window_days: usize,
     pub rebalance_days: usize,
+    /// Per stream (in stream order): day → weight multiplier in `[0, 1]`. Empty: no tilt; a
+    /// stream without an entry before a rebalance day keeps its full weight.
+    pub tilts: Vec<BTreeMap<NaiveDate, f64>>,
+}
+
+/// A stream's tilt on the latest day before `day`; 1 without one.
+fn tilt(tilts: &[BTreeMap<NaiveDate, f64>], stream: usize, day: NaiveDate) -> f64 {
+    tilts
+        .get(stream)
+        .and_then(|t| t.range(..day).next_back())
+        .map_or(1.0, |(_, v)| v.clamp(0.0, 1.0))
 }
 
 /// One input stream.
@@ -198,18 +213,24 @@ pub fn combine(streams: &[Stream], cfg: &CombineConfig) -> Combined {
     let (days, series) = aligned(streams);
     let n = streams.len();
     let mut capital: Vec<f64> = vec![0.0; n];
+    let mut cash = 0.0;
     let mut equity = cfg.initial_cash;
     let mut path = Vec::with_capacity(days.len());
     let mut weight_sum = vec![0.0; n];
     for t in 0..days.len() {
         if t % cfg.rebalance_days.max(1) == 0 {
             let history: Vec<Vec<f64>> = series.iter().map(|s| s[..t].to_vec()).collect();
-            capital = weights(&history, cfg).iter().map(|w| w * equity).collect();
+            capital = weights(&history, cfg)
+                .iter()
+                .enumerate()
+                .map(|(i, w)| w * tilt(&cfg.tilts, i, days[t]) * equity)
+                .collect();
+            cash = equity - capital.iter().sum::<f64>();
         }
         for (c, s) in capital.iter_mut().zip(&series) {
             *c *= 1.0 + s[t];
         }
-        equity = capital.iter().sum();
+        equity = capital.iter().sum::<f64>() + cash;
         for (sum, c) in weight_sum.iter_mut().zip(&capital) {
             *sum += if equity > 0.0 { c / equity } else { 0.0 };
         }
