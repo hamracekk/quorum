@@ -16,6 +16,7 @@ pub mod regime;
 pub mod robustness;
 pub mod scoreboard;
 pub mod signals;
+pub mod stress;
 mod sweep;
 pub mod tournament;
 pub mod validation;
