@@ -447,6 +447,7 @@ budget each.
   data staleness and loss thresholds.
 - **Secrets:** the macOS keychain on the laptop, a secret store on the server; venue keys
   trade-only and IP-restricted.
+- **Apple app (§21)** is the main client; the web dashboard stays a fallback.
 - **Dashboard:** portfolio, slots and their rung, open trades with their case files, verdicts and
   counterfactuals, factor and strategy records, agents, envelope (read-only), kill switch.
 - **Daily brief:** one page to the phone: P&L, positions and why, what the evaluator rejected,
@@ -483,6 +484,7 @@ quorum/
 │   ├── mcp/           # MCP server
 │   └── api/           # dashboard API
 ├── apps/dashboard/    # web UI
+├── apps/apple/        # SwiftUI app for iPhone, iPad and Mac (§21)
 ├── config/            # envelope (signed), slots, factors, impact map
 ├── deploy/            # systemd units, compose for side services
 └── docs/adr/
@@ -501,7 +503,7 @@ Each phase ends with a measurable exit criterion, not a feature list.
 | **P2 Second market** 🔄 multi-asset ETF research slot (Tiingo) ✅ | `equities` slot on IBKR paper (UCITS ETFs, stocks), trading calendars, equity data | Equity slot runs paper 4 weeks alongside crypto |
 | **P3 Allocator + risk process** 🔄 allocation study ✅ (risk parity + regime: drawdown 6–10% vs 35% crypto alone; strict exit not met: ETFs alone had the better later Sharpe), stress tests ✅ (book passes all 9; crypto alone fails covid 2020 and 2022 at the 15% account limit; ETFs alone fail a −30% gap), passive benchmark ✅ (`config/benchmark.toml`; 2019–2026, after costs, before tax: no variant beats or trails US equity, 60/40 or cash significantly; risk parity 10.8%/yr, 12% max DD vs 60/40 8.2%, 28%; US equity 15.8%), risk process ✅ slice 1 (separate process approves every paper order: envelope, leverage, daily/total loss halts, kill switch; Unix socket on the laptop, NATS with the server) | Cross-slot allocator, separate risk process, brakes, stress tests | Combined walk-forward beats each slot alone on Sharpe and drawdown |
 | **P4 Knowledge plane** 🔄 fetch + tiered Claude extraction + impact themes ✅ (scoring, priced-in next) | Tiered Claude extraction, impact map, priced-in check, prompt records | 4 weeks of extraction with a scored record per event kind |
-| **P5 Evaluator** 🔄 case files + counterfactual labels ✅ shadow (`quorum evaluate`: ~2 000 history cases per slot; no price, rank or portfolio-fit feature separates winners out of sample on crypto or ETFs; crisis-regime entries lose on crypto) | Case files, counterfactual tracking, meta-labeling (shadow first), Claude review (shadow first) | Meta model beats "always take" out of sample on ≥ 200 trades |
+| **P5 Evaluator** 🔄 case files + counterfactual labels ✅ shadow (`quorum evaluate`: ~2 000 history cases per slot; no price, rank or portfolio-fit feature separates winners out of sample on crypto or ETFs; crisis-regime entries lose on crypto, but a skip rule cannot be confirmed: 60 crisis entries in sample −8.1%, only 3 out of sample; risk-off flipped from +10.0% in sample to −3.4% out of sample) | Case files, counterfactual tracking, meta-labeling (shadow first), Claude review (shadow first) | Meta model beats "always take" out of sample on ≥ 200 trades |
 | **P6 Execution + live-micro** | Move to a VPS, raise the envelope, EMS tactics, TCA, reconciliation, first slot to LiveMicro via the gate | 12 weeks live-micro with slippage inside 1.5× model and no reconciliation break |
 | **P7 Expand** | Carry slot, futures slot, more factors, research agents at scale | Each new slot passes the ladder on its own |
 
@@ -592,3 +594,48 @@ ISIN, rebalance bands), rules for contributions and band rebalancing that prefer
 and a quarterly **AI review** of the holdings that only proposes changes (with their tax cost),
 is journaled and scored against "keep the policy unchanged". The risk process still approves every
 order. Evidence, Czech tax notes and the full sketch: [docs/long-term-investing.md](docs/long-term-investing.md).
+
+---
+
+## 21. Apple app (planned, 2026-10-16)
+
+The operator's main window onto quorum: a native **SwiftUI** app for iPhone, iPad and Mac
+(`apps/apple/`, one multiplatform target), designed for this purpose rather than a generic
+dashboard. It shows trades and investments and lets the operator **talk to the AI about them**.
+
+**What it shows**
+- **Home:** total equity in CZK and per book (trading slots, long-term book §20), today's change,
+  the passive benchmark over the same period (before and after tax), open incidents.
+- **Slots:** rung on the ladder, equity curve, positions and weights, risk status and halts.
+- **Trades:** every fill with its **case file** (§10: factors, regime, news readings at the time,
+  the evaluator's verdict) and how it turned out, beside the counterfactuals that were not taken.
+- **Investments (long-term book):** holdings, lots with their 3-year tax clock, drift from the
+  policy, and the AI review's proposals with their tax cost.
+- **News:** readings per instrument and theme, with how each kind of event has scored.
+- **Research:** factor, regime, evaluator and benchmark studies, as charts (Swift Charts).
+
+**Talking to the AI**
+- A chat on any object — a trade, a position, a slot, a proposal, a day — with the object's
+  journaled data attached as context ("why was this bought?", "what would selling cost in tax?",
+  "how did similar cases turn out?").
+- Answers come from Claude with **read-only tools** over the journal, studies and records; every
+  answer cites the records it used. The AI explains and proposes; it never trades.
+- Operator decisions made in the app (accept or decline a long-term proposal) are journaled and
+  scored like everything else.
+
+**Rules it keeps**
+- **Asymmetric rights hold in the app:** the kill switch (halt a slot or everything) is one tap;
+  resuming, accepting proposals and anything that adds risk need device authentication (Face ID
+  / passkey) and are journaled. The envelope is never edited from the app.
+- **No secrets on the device.** The app talks only to quorum's `api` process over HTTPS (on the
+  server; to the laptop through a private network such as Tailscale), authenticated with a
+  passkey. Claude and venue keys stay on the server.
+- **Data contract:** a versioned read API (JSON) plus a live stream (server-sent events) for
+  equity, fills, incidents and chat replies; the app keeps an offline cache.
+- **Notifications:** Apple push replaces ntfy for alerts and the daily summary once the server
+  exists; tapping one opens the object it is about.
+
+**Prerequisites:** the `api` process (P6, with the server move), the journal reads it serves, and
+an Apple developer account for push and distribution (TestFlight first). Built after the trading
+work and alongside the long-term book.
+

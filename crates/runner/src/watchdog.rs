@@ -31,6 +31,8 @@ pub struct Observation {
     pub slots: Vec<(String, Option<SlotSeen>)>,
     /// When the recorder last wrote a file; `None` when it has not recorded yet.
     pub recorder_last_write: Option<DateTime<Utc>>,
+    /// Whether the risk process answered; `None` when it was not checked.
+    pub risk_answered: Option<bool>,
 }
 
 /// What the watchdog remembers between runs.
@@ -76,6 +78,17 @@ fn incidents(o: &Observation) -> BTreeMap<String, (Severity, String)> {
                 ),
             );
         }
+    }
+    if o.risk_answered == Some(false) {
+        found.insert(
+            "risk process down".to_owned(),
+            (
+                Severity::Critical,
+                "it does not answer: paper slots refuse every order that adds risk until it is back \
+                 (`launchctl kickstart gui/$(id -u)/com.quorum.risk`)"
+                    .to_owned(),
+            ),
+        );
     }
     if let Some(last) = o.recorder_last_write {
         let age = (o.now - last).num_seconds();
@@ -155,6 +168,7 @@ mod tests {
             now: t(now),
             slots: vec![("crypto-spot".into(), Some((status.into(), t(heartbeat))))],
             recorder_last_write: Some(t(recorder)),
+            risk_answered: Some(true),
         }
     }
 
@@ -197,6 +211,25 @@ mod tests {
             titles.iter().any(|t| t.contains("recorder stale")),
             "{titles:?}"
         );
+    }
+
+    #[test]
+    fn a_silent_risk_process_alerts_once_and_recovers_once() {
+        let start = WatchState {
+            last_run: Some(t(5)),
+            open: BTreeMap::new(),
+        };
+        let down = Observation {
+            risk_answered: Some(false),
+            ..seen(10, 10, "running", 9)
+        };
+        let (first, state) = evaluate(&down, &start);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].severity, Severity::Critical);
+        assert!(first[0].title.contains("risk process down"));
+        let (second, state) = evaluate(&seen(15, 15, "running", 14), &state);
+        assert!(second[0].title.contains("recovered"));
+        assert!(state.open.is_empty());
     }
 
     #[test]

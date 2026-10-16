@@ -23,8 +23,11 @@ use serde_json::{Value, json};
 
 /// Bump when the prompt or schema changes: items are then read again.
 pub const PROMPT_VERSION: &str = "news-v1";
-/// Most events accepted from one item.
+/// Most events kept from one item: an answer with more keeps the strongest (magnitude, then
+/// confidence), each still validated.
 pub const MAX_EVENTS: usize = 5;
+/// More events than this is a runaway answer: rejected whole.
+pub const MAX_EVENTS_ANSWERED: usize = 2 * MAX_EVENTS;
 /// Longest rationale accepted (characters).
 pub const MAX_RATIONALE: usize = 400;
 const MAX_TOKENS: u32 = 2_048;
@@ -150,8 +153,11 @@ pub struct Reading {
     pub events: Vec<NewsEvent>,
 }
 
-/// Validate a model's answer for `item`. `assets` pairs each listed asset with its configured
-/// instrument. Any violation rejects the whole answer with the reason.
+/// Validate a model's answer for `item`.
+///
+/// `assets` pairs each listed asset with its configured instrument. Any violation rejects the
+/// whole answer with the reason; more than [`MAX_EVENTS`] valid events keep the strongest
+/// [`MAX_EVENTS`].
 pub fn parse(
     text: &str,
     item: &NewsItem,
@@ -164,9 +170,9 @@ pub fn parse(
     if !answer.relevant && !answer.events.is_empty() {
         return Err("events given for an item marked not relevant".into());
     }
-    if answer.events.len() > MAX_EVENTS {
+    if answer.events.len() > MAX_EVENTS_ANSWERED {
         return Err(format!(
-            "{} events (at most {MAX_EVENTS})",
+            "{} events (at most {MAX_EVENTS_ANSWERED})",
             answer.events.len()
         ));
     }
@@ -212,6 +218,15 @@ pub fn parse(
     }
     if answer.relevant && events.is_empty() {
         return Err("marked relevant without any event".into());
+    }
+    if events.len() > MAX_EVENTS {
+        // Stable: equal strength keeps the model's order.
+        events.sort_by(|a, b| {
+            b.magnitude
+                .cmp(&a.magnitude)
+                .then(b.confidence.total_cmp(&a.confidence))
+        });
+        events.truncate(MAX_EVENTS);
     }
     Ok(Reading {
         relevant: answer.relevant,

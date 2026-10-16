@@ -41,12 +41,14 @@ change when its module map, invariants or extension steps change.
   up to `t` only; `lab::factors::study` judges it out-of-sample after costs, with the direction
   fixed in-sample, before anything may weigh it.
 - **News is data, never an action.** Feed text reaches a model only as inert data; answers are
-  validated against a closed schema (`quorum_ai`) or rejected whole; readings are journaled for
+  validated against a closed schema (`quorum_ai`) or rejected whole (an answer with more than
+  five valid events keeps the strongest five; more than ten is rejected); readings are journaled for
   scoring and never place or size an order. The impact map is operator-written; models never add
   links. Bump `PROMPT_VERSION` / `THEMES_VERSION` when a prompt or schema changes.
-- **The passive benchmark is the bar.** `config/benchmark.toml` (US equity, 60/40, cash) is what
+- **The passive benchmark is the bar.** `config/benchmark.toml` (US equity, world equity, 60/40, cash) is what
   the same money makes by holding index funds; `quorum allocate` compares every variant with it
-  (after costs, corrected for the comparisons made) and the daily summary shows it. Nothing earns
+  (after costs, before and after the slots' tax, corrected for the comparisons made) and the daily
+  summary shows it. Nothing earns
   live capital without beating it out of sample.
 - **The evaluator is shadow until it earns weight.** `quorum_evaluator` builds case files and
   labels every proposed entry, taken or not; nothing it computes reaches a target, order or size
@@ -86,6 +88,7 @@ cargo run --release -p quorum-cli -- news fetch | extract | list | status   # kn
 cargo run --release -p quorum-cli -- risk status | halt --reason R | resume   # risk process, kill switch
 ./deploy/launchd/install-risk.sh            # risk process (`quorum risk run`); install before slots
 cargo run --release -p quorum-cli -- research sync --slot crypto-spot   # long history → data/research/bars
+cargo run --release -p quorum-cli -- research sync --slot crypto-pit    # survivorship-free crypto: every USDT pair, delisted included
 cargo run --release -p quorum-cli -- factors --slot crypto-spot   # factor study (IC, OOS, after costs)
 cargo run --release -p quorum-cli -- secrets status   # which API keys are in the keychain (never printed)
 cargo run --release -p quorum-cli -- regime --slot crypto-spot   # current regime + whether it helps

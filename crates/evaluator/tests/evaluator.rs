@@ -3,10 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, TimeZone, Utc};
+use quorum_core::regime::Regime;
 use quorum_core::{Bar, Event, InstrumentId, Series};
 use quorum_evaluator::case::Case;
 use quorum_evaluator::study::auc;
-use quorum_evaluator::{CaseConfig, EXIT, StudyConfig, Verdict, cases, study};
+use quorum_evaluator::{CaseConfig, EXIT, SkipVerdict, StudyConfig, Verdict, cases, study};
 
 fn day(n: i64) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0)
@@ -213,4 +214,40 @@ fn the_study_finds_a_separating_feature_and_not_noise() {
 fn too_few_cases_are_not_judged() {
     let report = study(&synthetic(20), &StudyConfig::default());
     assert!(report.features.iter().all(|r| r.verdict == Verdict::TooFew));
+}
+
+#[test]
+fn a_regime_skip_is_chosen_in_sample_and_judged_out_of_sample() {
+    // Crisis entries lose throughout (with some spread); trending ones win; choppy ones lose only
+    // in sample, so their rule fails out of sample.
+    let mut all = synthetic(400);
+    for (i, c) in all.iter_mut().enumerate() {
+        let wobble = ((i * 37) % 11) as f64 / 1_000.0;
+        let (regime, net) = match i % 3 {
+            0 => (Regime::Crisis, -0.05 + wobble),
+            1 => (Regime::Trending, 0.04 + wobble),
+            _ => (
+                Regime::Choppy,
+                if i < 280 {
+                    -0.03 + wobble
+                } else {
+                    0.03 + wobble
+                },
+            ),
+        };
+        c.regime = Some(regime);
+        c.outcomes.insert(EXIT.to_owned(), net);
+    }
+    let report = study(&all, &StudyConfig::default());
+    let skip = |r: Regime| {
+        report
+            .regime_skips
+            .iter()
+            .find(|s| s.regime == Some(r))
+            .expect("row")
+    };
+    assert_eq!(skip(Regime::Crisis).verdict, SkipVerdict::Holds);
+    assert!(skip(Regime::Crisis).skipping_out > skip(Regime::Crisis).always_out);
+    assert_eq!(skip(Regime::Trending).verdict, SkipVerdict::NotChosen);
+    assert_eq!(skip(Regime::Choppy).verdict, SkipVerdict::NotSignificant);
 }

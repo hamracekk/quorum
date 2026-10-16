@@ -344,6 +344,11 @@ async fn ports(slot: &SlotConfig, config: &Path, data: &Path) -> Result<Ports> {
             risk::paths(config, data).socket(),
         )),
         benchmark: benchmark::paper_benchmark(config),
+        notes: vec![Arc::new(evaluate::EvaluatorNote {
+            config: config.to_path_buf(),
+            data: data.to_path_buf(),
+            slot: slot.id.as_str().to_owned(),
+        })],
     })
 }
 
@@ -443,10 +448,59 @@ fn research_market(slot: &SlotConfig) -> Result<Box<dyn quorum_core::MarketData>
     }
 }
 
+/// Where a top-volume slot's candidate instruments are listed after a research sync.
+fn candidates_path(data: &Path, slot: &SlotId) -> PathBuf {
+    data.join("research")
+        .join(format!("candidates-{}.json", slot.as_str()))
+}
+
+/// A top-volume crypto slot's candidates: every USDT pair Binance ever listed, delisted ones
+/// included, from the public archive (whole history; `days` does not apply).
+async fn research_sync_archive(data: &Path, slot: &SlotConfig) -> Result<()> {
+    use quorum_data::binance_archive::{BinanceArchive, sync_archive, usdt_candidates};
+    if slot.venue.as_str() != "binance" {
+        bail!(
+            "{}: top-volume research history comes from Binance's archive only",
+            slot.id
+        );
+    }
+    let archive = BinanceArchive::new().context("binance archive")?;
+    let symbols = usdt_candidates(&archive.spot_symbols().await.context("archive listing")?);
+    println!(
+        "{} USDT pairs in the archive (delisted included); downloading the missing ones…",
+        symbols.len()
+    );
+    let store = research_store(data);
+    let report = sync_archive(&archive, &store, &symbols, &slot.interval, 8).await;
+    let mut stored = Vec::new();
+    for symbol in &symbols {
+        let id = quorum_core::InstrumentId::spot("binance", symbol)?;
+        if store
+            .load(&id, &slot.interval)?
+            .is_some_and(|s| !s.bars.is_empty())
+        {
+            stored.push(id);
+        }
+    }
+    let path = candidates_path(data, &slot.id);
+    std::fs::write(&path, serde_json::to_string_pretty(&stored)?)
+        .with_context(|| format!("{}", path.display()))?;
+    println!(
+        "{} fetched, {} already stored, {} without bars, {} failed (run again to retry) · {} candidates in {}",
+        report.fetched,
+        report.kept,
+        report.empty,
+        report.failed,
+        stored.len(),
+        path.display()
+    );
+    Ok(())
+}
+
 async fn research_sync(config: &Path, data: &Path, slot: &str, days: u32) -> Result<()> {
     let (slot, _) = load(config, slot)?;
     let quorum_slots::Universe::Fixed { instruments } = &slot.universe else {
-        bail!("{}: research sync needs a fixed universe for now", slot.id);
+        return research_sync_archive(data, &slot).await;
     };
     let market = research_market(&slot)?;
     let market = market.as_ref();
@@ -493,12 +547,23 @@ fn research_series(
     slot: &str,
 ) -> Result<(SlotConfig, Vec<quorum_core::Series>, f64)> {
     let (slot, _) = load(config, slot)?;
-    let quorum_slots::Universe::Fixed { instruments } = &slot.universe else {
-        bail!("{}: studies need a fixed universe for now", slot.id);
+    let instruments: Vec<quorum_core::InstrumentId> = match &slot.universe {
+        quorum_slots::Universe::Fixed { instruments } => instruments.clone(),
+        quorum_slots::Universe::TopVolume { .. } => {
+            let path = candidates_path(data, &slot.id);
+            let text = std::fs::read_to_string(&path).with_context(|| {
+                format!(
+                    "{}: no candidates yet; run `quorum research sync --slot {}`",
+                    path.display(),
+                    slot.id
+                )
+            })?;
+            serde_json::from_str(&text).with_context(|| format!("{}", path.display()))?
+        }
     };
     let load = |store: &ParquetStore| -> Result<Vec<quorum_core::Series>> {
         let mut series = Vec::new();
-        for instrument in instruments {
+        for instrument in &instruments {
             if let Some(s) = store.load(instrument, &slot.interval)?
                 && !s.bars.is_empty()
             {
@@ -757,10 +822,16 @@ async fn watchdog(config: &Path, data: &Path, slots: &[String]) -> Result<()> {
         let state = files.load_state()?.map(|s| (s.status, s.heartbeat));
         seen.push((id.clone(), state));
     }
+    let gate = quorum_risk::SocketGate::new(risk::paths(config, data).socket());
+    let risk_answered =
+        tokio::task::spawn_blocking(move || gate.request(&quorum_risk::Request::Status).is_ok())
+            .await
+            .ok();
     let observation = Observation {
         now: chrono::Utc::now(),
         slots: seen,
         recorder_last_write: last_write(&data.join("recorder")),
+        risk_answered,
     };
     let path = data.join("watchdog.json");
     let before: WatchState = std::fs::read_to_string(&path)

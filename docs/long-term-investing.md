@@ -83,11 +83,10 @@ ETCs (SGLN, debt securities) get the same time test.
 The passive book is the bar (`config/benchmark.toml`, CLAUDE.md): a cheap global
 equity-and-bond ETF portfolio has returned ~5% a year after inflation over decades, needs no
 work, and in CZ is tax-free after 3 years. The trading slots pay 15% of each year's net gain.
-So the comparison should:
-
-- add a **global all-world** benchmark (the US-only one is the most flattering to beat), and
-- add a **tax-adjusted view**: 15% of each year's net realized gain for the slots, 0% for a
-  passive fund held over 3 years.
+So the comparison includes a **world equity** benchmark (SPY/EFA/EEM at MSCI ACWI's split; the
+US-only one is the most flattering to beat) and an **after-tax view** (`trading_tax`: 15% of
+each year's net gain for the slots, 0% for a passive fund held over 3 years). 2019–2026 after
+tax: risk parity 9.1%/yr vs world equity 13.7% and 60/40 8.2%; none significant.
 
 ## 5. Design sketch: the long-term book (planned)
 

@@ -7,12 +7,12 @@ trader's paper daemon, scoped to a slot and its envelope.
 
 | File | What it holds |
 |---|---|
-| `lib.rs` | `Ports` (market data, stream, bar store, journal, event log, notifier, risk gate, optional passive benchmark for the daily summary), `RunnerError` |
+| `lib.rs` | `Ports` (market data, stream, bar store, journal, event log, notifier, risk gate, optional passive benchmark and extra lines (`DailyNote`, e.g. the shadow evaluator's record) for the daily summary), `RunnerError` |
 | `build.rs` | `strategy` (slot strategy → per-holding vol sizing → optional top-volume universe → optional book vol target), `backtest_config` (slot costs, brakes, exits + the envelope's daily loss), `interval_duration` |
 | `session.rs` | `SlotFiles` (`<data>/slots/<id>/`), `Session`, `StateFile`, `request_stop` |
 | `gate.rs` | `GatedBroker`: every order goes to the risk process first; verdicts recorded per session in `verdicts.jsonl` so replay repeats them |
 | `paper.rs` | `run`: preflight → open/resume → sync history → rebuild by replay → live loop; `RunOptions`, `Outcome`, `Status` |
-| `watchdog.rs` | The watchdog's decisions, pure: incidents (paper heartbeat stale or failed, recorder stale), alert once on open and once on recovery, skip right after a sleep |
+| `watchdog.rs` | The watchdog's decisions, pure: incidents (paper heartbeat stale or failed, recorder stale, risk process not answering), alert once on open and once on recovery, skip right after a sleep |
 | `tests/paper.rs` | End to end on fakes: journaling from the start, resume == uninterrupted run, offline days, gap backfill, stop, refusals, risk gate (approval, process down, replayed verdicts) |
 
 ## A run

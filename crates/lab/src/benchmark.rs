@@ -45,6 +45,10 @@ pub struct BenchmarkConfig {
     pub slot: String,
     /// The portfolio the daily paper summary compares against.
     pub summary: String,
+    /// Tax on a trading book's net gain per calendar year (0.15 = 15%); passive portfolios are
+    /// taken as held long enough to be exempt.
+    #[serde(default)]
+    pub trading_tax: f64,
     pub portfolios: Vec<Portfolio>,
 }
 
@@ -58,6 +62,9 @@ impl BenchmarkConfig {
     pub fn parse(text: &str) -> Result<Self, LabError> {
         let cfg: Self = toml::from_str(text).map_err(|e| LabError::Benchmark(e.to_string()))?;
         let invalid = |m: String| Err(LabError::Benchmark(m));
+        if !(0.0..1.0).contains(&cfg.trading_tax) {
+            return invalid(format!("trading_tax {} must be in [0, 1)", cfg.trading_tax));
+        }
         if cfg.portfolios.is_empty() {
             return invalid("no portfolios".to_owned());
         }
@@ -161,6 +168,39 @@ pub fn curve(
         });
     }
     Ok(out)
+}
+
+/// `curve` after paying `rate` of each calendar year's net gain at the year's last point.
+///
+/// Nothing is paid in a losing year and no loss is carried forward. The year's whole gain counts
+/// as realized: right for a trading book that turns over, an upper bound on the tax otherwise.
+#[must_use]
+pub fn after_tax(curve: &[EquityPoint], rate: f64) -> Vec<EquityPoint> {
+    use chrono::Datelike as _;
+    let mut out = Vec::with_capacity(curve.len());
+    // After-tax equity = pre-tax equity × `kept`, which shrinks by each year's tax.
+    let mut kept = 1.0;
+    let mut year_start = curve.first().map_or(0.0, |p| p.equity);
+    for (k, point) in curve.iter().enumerate() {
+        out.push(EquityPoint {
+            ts: point.ts,
+            equity: point.equity * kept,
+        });
+        let year_ends = curve
+            .get(k + 1)
+            .is_none_or(|next| next.ts.year() != point.ts.year());
+        if year_ends && year_start > 0.0 {
+            let gain = point.equity / year_start - 1.0;
+            if gain > 0.0 {
+                kept *= gain.mul_add(1.0 - rate, 1.0) / (1.0 + gain);
+                if let Some(last) = out.last_mut() {
+                    last.equity = point.equity * kept;
+                }
+            }
+            year_start = point.equity;
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

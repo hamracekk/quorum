@@ -12,6 +12,7 @@ quorum paper status --slot crypto-spot          # session, watermark, equity, po
 quorum paper stop --slot crypto-spot            # stop at the next heartbeat (resumable)
 quorum record                                   # forward recorder (config/recorder.toml)
 quorum research sync --slot multi-asset --days 7500   # research history → data/research/bars
+quorum research sync --slot crypto-pit           # top-volume slot: every USDT pair ever listed, from Binance's archive
 quorum factors --slot multi-asset --horizon 5   # factor study → data/factors/
 quorum backtest --slot crypto-spot --daily-loss 0.05   # slot strategy over research history: CAGR, Sharpe, DD, halts
 quorum allocate                                 # walk-forward slots, study allocating across them, compare with config/benchmark.toml

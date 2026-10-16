@@ -185,6 +185,23 @@ fn print(report: &EvaluatorStudy, slot: &str, source: Source, cost: f64) {
         );
     }
     println!(
+        "regime skips (skip a regime's entries if they lost in sample; judged on the later part):"
+    );
+    for r in &report.regime_skips {
+        println!(
+            "  skip {:<10} in {:>4} cases {:>6.2}% · out {:>4} cases {:>6.2}% (t {:>5.2}) · always take {:>5.2}% → with the skip {:>5.2}%  {:?}",
+            r.regime.map_or("unlabelled", |g| g.as_str()),
+            r.n_in,
+            r.mean_in * 100.0,
+            r.n_out,
+            r.mean_out * 100.0,
+            r.t_out,
+            r.always_out * 100.0,
+            r.skipping_out * 100.0,
+            r.verdict
+        );
+    }
+    println!(
         "features ({} tested; out of sample z ≥ {:.2} to separate winners at the exit):",
         report.features_tested, report.z_threshold
     );
@@ -197,5 +214,62 @@ fn print(report: &EvaluatorStudy, slot: &str, source: Source, cost: f64) {
             "{:<24} {:>6} {:>7.3} {:>8.3} {:>6.2}  {:?}",
             f.feature, f.n_out, f.auc_in, f.auc_out, f.z_out, f.verdict
         );
+    }
+}
+
+/// The shadow evaluator's record on the open paper session, for the daily summary.
+#[derive(Debug)]
+pub(crate) struct EvaluatorNote {
+    pub(crate) config: std::path::PathBuf,
+    pub(crate) data: std::path::PathBuf,
+    pub(crate) slot: String,
+}
+
+#[async_trait::async_trait]
+impl quorum_core::DailyNote for EvaluatorNote {
+    async fn line(&self) -> std::result::Result<Option<String>, quorum_core::PortError> {
+        let fail = |e: anyhow::Error| quorum_core::PortError::Invalid(format!("{e:#}"));
+        let (slot, envelope) = crate::load(&self.config, &self.slot).map_err(fail)?;
+        let step = quorum_runner::interval_duration(&slot.interval).map_err(|e| fail(e.into()))?;
+        let per_year = slot.calendar.bars_per_year(step.num_seconds());
+        let d = decisions(&self.config, &self.data, &slot, &envelope, Source::Paper)
+            .await
+            .map_err(fail)?;
+        let cost = crate::round_trip(&slot);
+        let found = cases(
+            &d.series,
+            &d.events,
+            &d.fills,
+            d.measure_from,
+            &CaseConfig::new(cost, per_year),
+        );
+        if found.is_empty() {
+            return Ok(None);
+        }
+        let report = study(&found, &StudyConfig::default());
+        let taken = found.iter().filter(|c| c.taken).count();
+        let labels: Vec<String> = report
+            .horizons
+            .iter()
+            .filter(|h| h.n > 0)
+            .map(|h| {
+                format!(
+                    "{} {:.0}% won, {:+.2}% mean (n {})",
+                    h.label,
+                    h.win_rate * 100.0,
+                    h.mean_net * 100.0,
+                    h.n
+                )
+            })
+            .collect();
+        Ok(Some(format!(
+            "shadow evaluator: {} entries since start ({taken} taken) · {}",
+            found.len(),
+            if labels.is_empty() {
+                "none labelled yet".to_owned()
+            } else {
+                labels.join(" · ")
+            }
+        )))
     }
 }

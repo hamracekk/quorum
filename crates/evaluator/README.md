@@ -11,7 +11,7 @@ of sample. Nothing here changes a trade: the size multiplier stays 1.0 until a m
 | File | What it holds |
 |---|---|
 | `case.rs` | `Case`, `CaseConfig`, `cases`: entries from the engine's `Target` events (flat → position, or a flip), point-in-time features, labels at `HORIZONS` and at the strategy's own `EXIT` |
-| `study.rs` | `study`: base rates per label and regime, the "always take" baseline in and out of sample, per-feature AUC with the direction fixed in sample, Bonferroni over features tested |
+| `study.rs` | `study`: base rates per label and regime, regime skips (a regime's entries skipped if they lost in sample, judged out of sample with a threshold corrected for the regimes tested), the "always take" baseline in and out of sample, per-feature AUC with the direction fixed in sample, Bonferroni over features tested |
 | `tests/evaluator.rs` | Labels after costs, counterfactuals, no look-ahead in features, flips, the warm-up of a paper session, AUC, study verdicts |
 
 ## A case

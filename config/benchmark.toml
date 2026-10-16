@@ -10,9 +10,25 @@
 slot = "multi-asset"
 summary = "60/40"
 
+# Czech tax on the trading slots' gains (§10 ZDP, operator assumption to confirm with an advisor):
+# 15% of each calendar year's net gain, nothing in a losing year, no loss carried forward. The
+# passive portfolios are taken as held over 3 years: tax-free. 0 turns the after-tax view off.
+trading_tax = 0.15
+
 [[portfolios]]
 name = "US equity"
 holdings = [{ instrument = "tiingo:SPY:equity", weight = 1.0 }]
+
+# Global equity at roughly MSCI ACWI's split (US 64%, developed ex-US 26%, emerging 10%): what
+# an all-world fund (e.g. VWCE) holds. The fairer bar than US equity alone, the century's winner.
+[[portfolios]]
+name = "world equity"
+rebalance_days = 21
+holdings = [
+  { instrument = "tiingo:SPY:equity", weight = 0.64 },
+  { instrument = "tiingo:EFA:equity", weight = 0.26 },
+  { instrument = "tiingo:EEM:equity", weight = 0.10 },
+]
 
 [[portfolios]]
 name = "60/40"
