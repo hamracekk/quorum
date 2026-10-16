@@ -12,6 +12,7 @@
 
 mod config;
 mod ladder;
+pub mod ucits;
 
 pub use config::{
     Brakes, CostModel, Exits, Sizing, SlotConfig, SlotConfigError, SlotId, StrategySpec,

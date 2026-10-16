@@ -7,6 +7,7 @@
 pub mod agents;
 pub mod backtest;
 pub mod broker;
+pub mod calendar;
 pub mod chat;
 pub mod derivatives;
 pub mod engine;

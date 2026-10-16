@@ -191,6 +191,8 @@ fn the_next_bar_is_ready_once_the_next_weekday_is_over() {
     assert_eq!(next_bar_ready(day(2026, 10, 15)), day(2026, 10, 17));
     // Friday's bar → Monday's, ready Tuesday 00:00 UTC (the weekend has none).
     assert_eq!(next_bar_ready(day(2026, 10, 16)), day(2026, 10, 20));
+    // Wednesday 3 July 2024 → Friday the 5th (Independence Day), ready Saturday.
+    assert_eq!(next_bar_ready(day(2024, 7, 3)), day(2024, 7, 6));
 }
 
 #[tokio::test]

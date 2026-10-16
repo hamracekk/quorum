@@ -202,15 +202,11 @@ impl MarketData for TiingoDaily {
     }
 }
 
-/// When the first daily bar after `last` can be fetched: the next weekday's bar, once that UTC
-/// day is over (US exchanges trade on weekdays; holidays just find nothing new).
+/// When the first daily bar after `last` can be fetched: the next US trading day's bar
+/// (`core::calendar`, NYSE holidays skipped), once that UTC day is over.
 #[must_use]
 pub fn next_bar_ready(last: DateTime<Utc>) -> DateTime<Utc> {
-    use chrono::Datelike as _;
-    let mut day = last.date_naive() + TimeDelta::days(1);
-    while matches!(day.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun) {
-        day += TimeDelta::days(1);
-    }
+    let day = quorum_core::calendar::Exchange::Nyse.next_trading_day(last.date_naive());
     (day + TimeDelta::days(1))
         .and_time(chrono::NaiveTime::MIN)
         .and_utc()
@@ -220,9 +216,9 @@ pub fn next_bar_ready(last: DateTime<Utc>) -> DateTime<Utc> {
 /// and yields every instrument's new bars, in time order and in the order subscribed within a
 /// day.
 ///
-/// Mindful of Tiingo's free limits (50 requests an hour): it sleeps until the next weekday's bar
-/// can exist, asks the first instrument first and fetches the rest only once that one has a new
-/// bar; on a holiday it asks once an hour.
+/// Mindful of Tiingo's free limits (50 requests an hour): it sleeps until the next trading day's
+/// bar can exist (US holidays skipped), asks the first instrument first and fetches the rest only
+/// once that one has a new bar; if a bar is late it asks once an hour.
 #[derive(Debug, Clone)]
 pub struct TiingoStream {
     source: std::sync::Arc<TiingoDaily>,

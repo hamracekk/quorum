@@ -1,0 +1,84 @@
+# UCITS funds quorum may hold (EU retail: UCITS funds with a KID only, DESIGN §19.1), keyed by
+# ISIN — how IBKR finds a contract. Listings are where each fund trades; `verified = false` until
+# they are confirmed against IBKR's contract search once the account exists (tickers differ by
+# exchange, and some here come from secondary sources: docs/long-term-investing.md).
+# `stand_in`: the US-listed fund on the same index that research uses until IBKR's prices exist.
+# A list of candidates, not a recommendation.
+
+[[funds]]
+isin = "IE00BK5BQT80"
+name = "Vanguard FTSE All-World UCITS ETF (Acc)"
+exposure = "world equity"
+accumulating = true
+ter = 0.0014
+listings = [
+  { exchange = "xetra", symbol = "VWCE", currency = "EUR" },
+  { exchange = "lse", symbol = "VWRP", currency = "USD" },
+]
+
+[[funds]]
+isin = "IE00B4L5Y983"
+name = "iShares Core MSCI World UCITS ETF (Acc)"
+exposure = "developed-market equity"
+accumulating = true
+ter = 0.0020
+listings = [
+  { exchange = "xetra", symbol = "EUNL", currency = "EUR" },
+  { exchange = "lse", symbol = "IWDA", currency = "USD" },
+]
+
+[[funds]]
+isin = "IE00B5BMR087"
+name = "iShares Core S&P 500 UCITS ETF (Acc)"
+exposure = "US large-cap equity"
+accumulating = true
+ter = 0.0007
+stand_in = "tiingo:SPY:equity"
+listings = [
+  { exchange = "xetra", symbol = "SXR8", currency = "EUR" },
+  { exchange = "lse", symbol = "CSPX", currency = "USD" },
+]
+
+[[funds]]
+isin = "IE00B3YLTY66"
+name = "SPDR MSCI ACWI IMI UCITS ETF (Acc)"
+exposure = "world equity incl. small caps"
+accumulating = true
+ter = 0.0017
+listings = [{ exchange = "xetra", symbol = "SPYI", currency = "EUR" }]
+
+[[funds]]
+isin = "IE00BKM4GZ66"
+name = "iShares Core MSCI EM IMI UCITS ETF (Acc)"
+exposure = "emerging-market equity"
+accumulating = true
+stand_in = "tiingo:EEM:equity"
+listings = [
+  { exchange = "xetra", symbol = "IS3N", currency = "EUR" },
+  { exchange = "lse", symbol = "EIMI", currency = "USD" },
+]
+
+[[funds]]
+isin = "IE00BDBRDM35"
+name = "iShares Core Global Aggregate Bond UCITS ETF EUR Hedged (Acc)"
+exposure = "global investment-grade bonds, EUR-hedged"
+accumulating = true
+ter = 0.0010
+stand_in = "tiingo:IEF:equity"
+listings = [{ exchange = "xetra", symbol = "EUNA", currency = "EUR" }]
+
+[[funds]]
+isin = "LU0290358497"
+name = "Xtrackers II EUR Overnight Rate Swap UCITS ETF"
+exposure = "EUR cash (€STR)"
+accumulating = true
+ter = 0.0010
+listings = [{ exchange = "xetra", symbol = "XEON", currency = "EUR" }]
+
+[[funds]]
+isin = "IE00B4ND3602"
+name = "iShares Physical Gold ETC"
+exposure = "gold (an ETC: a debt security, not a fund)"
+accumulating = true
+stand_in = "tiingo:GLD:equity"
+listings = [{ exchange = "lse", symbol = "IGLN", currency = "USD" }]
